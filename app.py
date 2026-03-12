@@ -208,13 +208,14 @@ async def start_handler(client, message: Message):
     bot_info = await client.get_me()
     bot_name = bot_info.first_name
     welcome_text = (
-        f"<emoji id=5334607672375254726>👋</emoji> <b>Welcome to {bot_name}!</b>\n\n"
-        f"I'm your ultimate companion for high-speed, high-quality video downloads. <emoji id=5431411531705224321>🚀</emoji> Whatever you need, I capture it with precision! <emoji id=5431326442648507850>✨</emoji>\n\n"
+        f"<emoji id=5220195537520711716>⚡️</emoji> <b>Welcome to {bot_name}!</b>\n\n"
+        f"I'm your ultimate companion for high-speed, high-quality video downloads. <emoji id=5217880283860194582>🚀</emoji> Whatever you need, I capture it with precision! <emoji id=5222044641200720562>🌸</emoji>\n\n"
         f"<b>Available Services:</b>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>RM Downloader:</b> <code>/rm [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Shikho:</b> <code>/shikho [link]</code>\n"
+        f" <emoji id=5206607081334906820>✔️</emoji> <b>Udvash:</b> <code>/udvash [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>AFS Downloader:</b> <code>/afs [link]</code>\n\n"
-        f"<i>Just send me a link and let the magic happen!</i> <emoji id=5224607267797606837>☄️</emoji>"
+        f"<i>Just send me a link and let the magic happen!</i> <emoji id=5220166546491459639>🔥</emoji>"
     )
     await message.reply_text(welcome_text, parse_mode=ParseMode.HTML)
 
@@ -601,6 +602,128 @@ async def shikho_link_handler(client, message: Message):
         
         if returncode != 0 or not os.path.exists(filename):
             await status_msg.edit_text(f"<emoji id=5274099962655816924>❌</emoji> <b>Download failed!</b>\n\nThe video might be restricted or inaccessible.", parse_mode=ParseMode.HTML)
+            return
+
+        await status_msg.edit_text("<emoji id=5449683594425410231>📤</emoji> Uploading to Telegram...", parse_mode=ParseMode.HTML)
+        
+        width, height, duration = await get_video_metadata(filename)
+        user_name = message.from_user.first_name or message.from_user.username or "User"
+        rich_caption = (
+            f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
+            f"<emoji id=5251203410396458957>👤</emoji> <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
+        )
+
+        start_upload = time.time()
+        await client.send_video(
+            chat_id=message.chat.id,
+            video=filename,
+            thumb=thumb_name,
+            caption=rich_caption,
+            parse_mode=ParseMode.HTML,
+            duration=duration,
+            width=width,
+            height=height,
+            supports_streaming=True,
+            reply_to_message_id=message.id,
+            progress=upload_progress,
+            progress_args=(client, status_msg, start_upload)
+        )
+        await status_msg.delete()
+
+    except Exception:
+        await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> <b>A processing error occurred.</b>", parse_mode=ParseMode.HTML)
+    finally:
+        user_locks.pop(user_id, None)
+        if os.path.exists(filename):
+            os.remove(filename)
+
+@app.on_message(filters.command("udvash"))
+async def udvash_link_handler(client, message: Message):
+    user_id = message.from_user.id
+    if user_id in user_locks:
+        await message.reply_text("<emoji id=5402186569006210455>⏳</emoji> Please wait until your current download is complete.", parse_mode=ParseMode.HTML)
+        return
+
+    parts = message.text.split()
+    url = None
+    
+    if len(parts) >= 2:
+        url = parts[1]
+        
+    if not url and message.reply_to_message and message.reply_to_message.text:
+        url = message.reply_to_message.text.strip()
+        
+    if not url:
+        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please provide an Udvash URL.\nUsage: /udvash <URL>", parse_mode=ParseMode.HTML)
+        return
+
+    # URL Validation
+    allowed_domains = ["udvash-unmesh.com", "udvash.com"]
+    if not any(domain in url for domain in allowed_domains):
+        await message.reply_text(
+            "<emoji id=5274099962655816924>❌</emoji> <b>Invalid URL!</b>\n\nOnly valid URLs are allowed for this command.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Processing Udvash video...", parse_mode=ParseMode.HTML)
+    user_locks[user_id] = True
+    filename = f"udvash_video_{user_id}_{int(time.time())}.mp4"
+    thumb_name = None
+    title = "Udvash Video"
+    
+    try:
+        # Fetch metadata using yt-dlp (No special headers needed)
+        metadata_cmd = [
+            "yt-dlp",
+            "--dump-json",
+            "--no-check-certificate",
+            url
+        ]
+        
+        process_meta = await asyncio.create_subprocess_exec(
+            *metadata_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout_meta, stderr_meta = await process_meta.communicate()
+        
+        if process_meta.returncode == 0:
+            try:
+                metadata = json.loads(stdout_meta.decode())
+                title = metadata.get("title", "Udvash Video")
+                thumbnail_url = metadata.get("thumbnail")
+                
+                if thumbnail_url:
+                    thumb_name = f"udvash_thumb_{user_id}_{int(time.time())}.jpg"
+                    async with httpx.AsyncClient(timeout=20) as client_dl:
+                        r_thumb = await client_dl.get(thumbnail_url)
+                        if r_thumb.status_code == 200:
+                            with open(thumb_name, "wb") as f:
+                                f.write(r_thumb.content)
+                        else:
+                            thumb_name = None
+            except Exception:
+                pass
+
+        # Construct yt-dlp command for direct download
+        cmd = [
+            "yt-dlp",
+            "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "-o", filename,
+            "--no-playlist",
+            "--merge-output-format", "mp4",
+            "--no-check-certificate",
+            "--concurrent-fragments", "10"
+        ]
+        cmd.append(url)
+        
+        await status_msg.edit_text("<emoji id=5429381339851796035>✅</emoji> Found! Downloading to server...", parse_mode=ParseMode.HTML)
+        
+        returncode, stderr = await download_with_progress(cmd, message, status_msg)
+        
+        if returncode != 0 or not os.path.exists(filename):
+            await status_msg.edit_text(f"<emoji id=5274099962655816924>❌</emoji> <b>Download failed!</b>\n\nPlease check the link or try again.", parse_mode=ParseMode.HTML)
             return
 
         await status_msg.edit_text("<emoji id=5449683594425410231>📤</emoji> Uploading to Telegram...", parse_mode=ParseMode.HTML)
