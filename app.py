@@ -205,269 +205,22 @@ async def get_bunny_m3u8(url):
 # =================== Handlers ===================
 @app.on_message(filters.command("start"))
 async def start_handler(client, message: Message):
+    bot_info = await client.get_me()
+    bot_name = bot_info.first_name
     welcome_text = (
-        f"<emoji id=5334607672375254726>👋</emoji> <b>Welcome to ToyDown Bot!</b>\n\n"
-        f"I am a powerful media downloader that supports high-quality videos. <emoji id=5341715473882955310>⚙️</emoji>  \n\n"
+        f"<emoji id=5334607672375254726>👋</emoji> <b>Welcome to {bot_name}!</b>\n\n"
+        f"I'm your ultimate companion for high-speed, high-quality video downloads. <emoji id=5431411531705224321>🚀</emoji> Whatever you need, I capture it with precision! <emoji id=5431326442648507850>✨</emoji>\n\n"
         f"<b>Available Services:</b>\n"
-        f" <emoji id=5206607081334906820>✔️</emoji> <b>Instagram:</b> <code>/ig [link]</code>\n"
-        f" <emoji id=5206607081334906820>✔️</emoji> <b>YouTube:</b> <code>/yt [link]</code>\n"
-        f" <emoji id=5206607081334906820>✔️</emoji> <b>Facebook:</b> <code>/fb [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>RM Downloader:</b> <code>/rm [link]</code>\n"
+        f" <emoji id=5206607081334906820>✔️</emoji> <b>Shikho:</b> <code>/shikho [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>AFS Downloader:</b> <code>/afs [link]</code>\n\n"
         f"<i>Just send me a link and let the magic happen!</i> <emoji id=5224607267797606837>☄️</emoji>"
     )
     await message.reply_text(welcome_text, parse_mode=ParseMode.HTML)
 
-@app.on_message(filters.command("ig"))
-async def download_instagram_video(client, message: Message):
-    user_id = message.from_user.id
-    if user_id in user_locks:
-        await message.reply_text("<emoji id=5402186569006210455>⏳</emoji> Please wait until your current download is complete.", parse_mode=ParseMode.HTML)
-        return
 
-    parts = message.text.split()
-    url = parts[1] if len(parts) >= 2 else (
-        message.reply_to_message.text.strip() if message.reply_to_message and message.reply_to_message.text else None
-    )
 
-    if not url or "instagram.com" not in url:
-        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please provide a valid Instagram URL.\nUsage: /ig <Instagram URL>", parse_mode=ParseMode.HTML)
-        return
 
-    status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Searching the video...", parse_mode=ParseMode.HTML)
-    user_locks[user_id] = True
-    filename = f"ig_video_{user_id}_{int(time.time())}.mp4"
-
-    try:
-        async with httpx.AsyncClient(timeout=20) as client_http:
-            resp = await client_http.get(API_ENDPOINT + url)
-            data = resp.json()
-
-        if not data.get("status") or not data["data"].get("direct_video"):
-            await status_msg.edit_text("❌ Could not retrieve Instagram video.")
-            return
-
-        video_url = data["data"]["direct_video"][0]
-        await status_msg.edit_text("<emoji id=5429381339851796035>✅</emoji> Found! Downloading to server...", parse_mode=ParseMode.HTML)
-
-        start_time = time.time()
-        
-        async with httpx.AsyncClient(timeout=60) as client_dl:
-            async with client_dl.stream("GET", video_url) as r:
-                with open(filename, "wb") as f:
-                    async for chunk in r.aiter_bytes():
-                        f.write(chunk)
-        
-        await status_msg.edit_text("<emoji id=5449683594425410231>📤</emoji> Uploading to Telegram...", parse_mode=ParseMode.HTML)
-        
-        width, height, duration = await get_video_metadata(filename)
-        user_name = message.from_user.first_name or message.from_user.username or "User"
-        # Using HTML for custom emoji support
-        rich_caption = (
-            f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{data.get('title', 'Instagram Reel')}</code>\n"
-            f"<emoji id=5251203410396458957>👤</emoji> <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
-        )
-
-        start_upload = time.time()
-        await client.send_video(
-            chat_id=message.chat.id,
-            video=filename,
-            caption=rich_caption,
-            parse_mode=ParseMode.HTML,
-            duration=duration,
-            width=width,
-            height=height,
-            supports_streaming=True,
-            reply_to_message_id=message.id,
-            progress=upload_progress,
-            progress_args=(client, status_msg, start_upload)
-        )
-
-        await status_msg.delete()
-
-    except Exception as e:
-        await status_msg.edit_text(f"⚠️ An error occurred.\n\nError: `{e}`")
-    finally:
-        user_locks.pop(user_id, None)
-        if os.path.exists(filename):
-            os.remove(filename)
-
-@app.on_message(filters.command("yt"))
-async def download_youtube_video(client, message: Message):
-    user_id = message.from_user.id
-    if user_id in user_locks:
-        await message.reply_text("<emoji id=5402186569006210455>⏳</emoji> Please wait until your current download is complete.", parse_mode=ParseMode.HTML)
-        return
-
-    parts = message.text.split()
-    url = parts[1] if len(parts) >= 2 else (
-        message.reply_to_message.text.strip() if message.reply_to_message and message.reply_to_message.text else None
-    )
-
-    if not url or not any(domain in url for domain in ["youtube.com", "youtu.be"]):
-        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please provide a valid YouTube video or Shorts URL.\nUsage: /yt <YouTube URL>", parse_mode=ParseMode.HTML)
-        return
-
-    status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Fetching the YouTube video...", parse_mode=ParseMode.HTML)
-    user_locks[user_id] = True
-    filename = f"yt_video_{user_id}_{int(time.time())}.mp4"
-    thumb_name = f"yt_thumb_{user_id}_{int(time.time())}.jpg"
-
-    try:
-        title = "YouTube Video"
-        await status_msg.edit_text("<emoji id=5429381339851796035>✅</emoji> Found! Downloading to server...", parse_mode=ParseMode.HTML)
-
-        # Use yt-dlp for robust YouTube downloads
-        cmd = [
-            "yt-dlp",
-            "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
-            "-o", filename,
-            "--no-playlist",
-            "--merge-output-format", "mp4",
-            "--no-check-certificate"
-        ]
-        cmd.append(url)
-        
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await process.communicate()
-        
-        if process.returncode != 0 or not os.path.exists(filename):
-            await status_msg.edit_text(f"<emoji id=5274099962655816924>❌</emoji> <b>Failed to download video!</b>\n\nPlease check the link and try again.", parse_mode=ParseMode.HTML)
-            return
-
-        await status_msg.edit_text("<emoji id=5449683594425410231>📤</emoji> Uploading to Telegram...", parse_mode=ParseMode.HTML)
-        
-        width, height, duration = await get_video_metadata(filename)
-        user_name = message.from_user.first_name or message.from_user.username or "User"
-        # Using HTML for custom emoji support
-        rich_caption = (
-            f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
-            f"<emoji id=5251203410396458957>👤</emoji> <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
-        )
-
-        start_upload = time.time()
-        await client.send_video(
-            chat_id=message.chat.id,
-            video=filename,
-            thumb=thumb_name,
-            caption=rich_caption,
-            parse_mode=ParseMode.HTML,
-            duration=duration,
-            width=width,
-            height=height,
-            supports_streaming=True,
-            reply_to_message_id=message.id,
-            progress=upload_progress,
-            progress_args=(client, status_msg, start_upload)
-        )
-
-        await status_msg.delete()
-
-    except Exception as e:
-        await status_msg.edit_text(f"⚠️ An error occurred.\n\nError: `{e}`")
-    finally:
-        user_locks.pop(user_id, None)
-        if os.path.exists(filename):
-            os.remove(filename)
-        if thumb_name and os.path.exists(thumb_name):
-            os.remove(thumb_name)
-
-@app.on_message(filters.command("fb"))
-async def download_facebook_video(client, message: Message):
-    user_id = message.from_user.id
-    if user_id in user_locks:
-        await message.reply_text("<emoji id=5402186569006210455>⏳</emoji> Please wait until your current download is complete.", parse_mode=ParseMode.HTML)
-        return
-
-    parts = message.text.split()
-    url = parts[1] if len(parts) >= 2 else (
-        message.reply_to_message.text.strip() if message.reply_to_message and message.reply_to_message.text else None
-    )
-
-    if not url or not any(domain in url for domain in ["facebook.com", "fb.watch"]):
-        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please provide a valid Facebook URL.\nUsage: /fb <Facebook URL>", parse_mode=ParseMode.HTML)
-        return
-
-    status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Searching the video...", parse_mode=ParseMode.HTML)
-    user_locks[user_id] = True
-    filename = f"fb_video_{user_id}_{int(time.time())}.mp4"
-    thumb_name = f"fb_thumb_{user_id}_{int(time.time())}.jpg"
-
-    try:
-        async with httpx.AsyncClient(timeout=30) as client_http:
-            res = await client_http.get(API_ENDPOINT + url)
-            data = res.json()
-
-        if not data.get("status"):
-            raise Exception("API returned no valid video")
-
-        # Extract data based on user-provided format
-        video_url = data["data"]["media"].get("video") or data["data"]["media"].get("download")
-        thumbnail_url = data["data"].get("thumbnail")
-        title = data.get("title", "🎬 Facebook Video")
-
-        if not video_url:
-            raise Exception("Could not find video URL in API response")
-
-        # Download thumbnail if available
-        if thumbnail_url:
-            async with httpx.AsyncClient(timeout=20) as client_dl:
-                r_thumb = await client_dl.get(thumbnail_url)
-                if r_thumb.status_code == 200:
-                    with open(thumb_name, "wb") as f:
-                        f.write(r_thumb.content)
-                else:
-                    thumb_name = None
-        else:
-            thumb_name = None
-
-        await status_msg.edit_text("<emoji id=5429381339851796035>✅</emoji> Found! Downloading to server...", parse_mode=ParseMode.HTML)
-
-        async with httpx.AsyncClient(timeout=60) as client_dl:
-            async with client_dl.stream("GET", video_url) as r:
-                with open(filename, "wb") as f:
-                    async for chunk in r.aiter_bytes():
-                        f.write(chunk)
-
-        await status_msg.edit_text("<emoji id=5449683594425410231>📤</emoji> Uploading to Telegram...", parse_mode=ParseMode.HTML)
-        
-        width, height, duration = await get_video_metadata(filename)
-        user_name = message.from_user.first_name or message.from_user.username or "User"
-        rich_caption = (
-            f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
-            f"<emoji id=5251203410396458957>👤</emoji> <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
-        )
-
-        start_upload = time.time()
-        await client.send_video(
-            chat_id=message.chat.id,
-            video=filename,
-            thumb=thumb_name,
-            caption=rich_caption,
-            parse_mode=ParseMode.HTML,
-            duration=duration,
-            width=width,
-            height=height,
-            supports_streaming=True,
-            reply_to_message_id=message.id,
-            progress=upload_progress,
-            progress_args=(client, status_msg, start_upload)
-        )
-
-        await status_msg.delete()
-
-    except Exception as e:
-        await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> An error occurred.\n\nError: `{e}`", parse_mode=ParseMode.HTML)
-    finally:
-        user_locks.pop(user_id, None)
-        if os.path.exists(filename):
-            os.remove(filename)
-        if thumb_name and os.path.exists(thumb_name):
-            os.remove(thumb_name)
 
 @app.on_message(filters.command("afs"))
 async def afs_link_handler(client, message: Message):
@@ -562,7 +315,7 @@ async def afs_link_handler(client, message: Message):
             "--add-header", "Sec-Fetch-Mode: cors",
             "--no-check-certificate",
             "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL",
-            "--concurrent-fragments", "50"
+            "--concurrent-fragments", "10"
         ]
         cmd.append(url)
         
@@ -700,7 +453,145 @@ async def rm_link_handler(client, message: Message):
             "--add-header", "Sec-Fetch-Mode: cors",
             "--no-check-certificate",
             "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL",
-            "--concurrent-fragments", "50"
+            "--concurrent-fragments", "10"
+        ]
+        cmd.append(url)
+        
+        await status_msg.edit_text("<emoji id=5429381339851796035>✅</emoji> Found! Downloading to server...", parse_mode=ParseMode.HTML)
+        
+        returncode, stderr = await download_with_progress(cmd, message, status_msg)
+        
+        if returncode != 0 or not os.path.exists(filename):
+            await status_msg.edit_text(f"<emoji id=5274099962655816924>❌</emoji> <b>Download failed!</b>\n\nThe video might be restricted or inaccessible.", parse_mode=ParseMode.HTML)
+            return
+
+        await status_msg.edit_text("<emoji id=5449683594425410231>📤</emoji> Uploading to Telegram...", parse_mode=ParseMode.HTML)
+        
+        width, height, duration = await get_video_metadata(filename)
+        user_name = message.from_user.first_name or message.from_user.username or "User"
+        rich_caption = (
+            f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
+            f"<emoji id=5251203410396458957>👤</emoji> <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
+        )
+
+        start_upload = time.time()
+        await client.send_video(
+            chat_id=message.chat.id,
+            video=filename,
+            thumb=thumb_name,
+            caption=rich_caption,
+            parse_mode=ParseMode.HTML,
+            duration=duration,
+            width=width,
+            height=height,
+            supports_streaming=True,
+            reply_to_message_id=message.id,
+            progress=upload_progress,
+            progress_args=(client, status_msg, start_upload)
+        )
+        await status_msg.delete()
+
+    except Exception:
+        await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> <b>A processing error occurred.</b>", parse_mode=ParseMode.HTML)
+    finally:
+        user_locks.pop(user_id, None)
+        if os.path.exists(filename):
+            os.remove(filename)
+
+@app.on_message(filters.command("shikho"))
+async def shikho_link_handler(client, message: Message):
+    user_id = message.from_user.id
+    if user_id in user_locks:
+        await message.reply_text("<emoji id=5402186569006210455>⏳</emoji> Please wait until your current download is complete.", parse_mode=ParseMode.HTML)
+        return
+
+    parts = message.text.split()
+    url = None
+    referer = "https://app.shikho.com/"
+    
+    if len(parts) >= 2:
+        url = parts[1]
+        
+    if not url and message.reply_to_message and message.reply_to_message.text:
+        url = message.reply_to_message.text.strip()
+        
+    if not url:
+        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please provide a Shikho URL.\nUsage: /shikho <URL>", parse_mode=ParseMode.HTML)
+        return
+
+    # URL Validation
+    allowed_domains = ["tenbytecdn.com", "shikho.com"]
+    if not any(domain in url for domain in allowed_domains):
+        await message.reply_text(
+            "<emoji id=5274099962655816924>❌</emoji> <b>Invalid URL!</b>\n\nOnly valid URLs are allowed for this command.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Processing Shikho video...", parse_mode=ParseMode.HTML)
+    user_locks[user_id] = True
+    filename = f"shikho_video_{user_id}_{int(time.time())}.mp4"
+    thumb_name = None
+    title = "Shikho Video"
+    
+    try:
+        # Fetch metadata using yt-dlp
+        metadata_cmd = [
+            "yt-dlp",
+            "--dump-json",
+            "--referer", referer,
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "--add-header", "Origin: https://app.shikho.com",
+            "--add-header", "Accept: */*",
+            "--add-header", "Accept-Language: en-US,en;q=0.9",
+            "--add-header", "Sec-Fetch-Site: cross-site",
+            "--add-header", "Sec-Fetch-Mode: cors",
+            "--no-check-certificate",
+            url
+        ]
+        
+        process_meta = await asyncio.create_subprocess_exec(
+            *metadata_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout_meta, stderr_meta = await process_meta.communicate()
+        
+        if process_meta.returncode == 0:
+            try:
+                metadata = json.loads(stdout_meta.decode())
+                title = metadata.get("title", "Shikho Video")
+                thumbnail_url = metadata.get("thumbnail")
+                
+                if thumbnail_url:
+                    thumb_name = f"shikho_thumb_{user_id}_{int(time.time())}.jpg"
+                    async with httpx.AsyncClient(timeout=20) as client_dl:
+                        r_thumb = await client_dl.get(thumbnail_url)
+                        if r_thumb.status_code == 200:
+                            with open(thumb_name, "wb") as f:
+                                f.write(r_thumb.content)
+                        else:
+                            thumb_name = None
+            except Exception:
+                pass
+
+        # Construct yt-dlp command with 720p quality
+        cmd = [
+            "yt-dlp",
+            "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "-o", filename,
+            "--no-playlist",
+            "--merge-output-format", "mp4",
+            "--referer", referer,
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "--add-header", "Origin: https://app.shikho.com",
+            "--add-header", "Accept: */*",
+            "--add-header", "Accept-Language: en-US,en;q=0.9",
+            "--add-header", "Sec-Fetch-Site: cross-site",
+            "--add-header", "Sec-Fetch-Mode: cors",
+            "--no-check-certificate",
+            "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL",
+            "--concurrent-fragments", "10"
         ]
         cmd.append(url)
         
