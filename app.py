@@ -19,12 +19,16 @@ from pyrogram.types import Message
 API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+ADMIN_IDS = [int(i.strip()) for i in os.environ.get("ADMIN_IDS", "").split(",") if i.strip()]
+
+
 
 app = Client("toydownbot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 flask_app = Flask(__name__)
 
 API_ENDPOINT = "https://tele-social.vercel.app/down?url="
-user_locks = {}
+
+
 
 # =================== Flask ===================
 @flask_app.route("/")
@@ -41,6 +45,7 @@ def health_check():
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
+
     flask_app.run(host="0.0.0.0", port=port)
 
 # =================== Progress ===================
@@ -205,7 +210,12 @@ async def get_bunny_m3u8(url):
 # =================== Handlers ===================
 @app.on_message(filters.command("start"))
 async def start_handler(client, message: Message):
+    user_id = message.from_user.id
+    if ADMIN_IDS and user_id not in ADMIN_IDS:
+        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
+        return
     bot_info = await client.get_me()
+
     bot_name = bot_info.first_name
     welcome_text = (
         f"<emoji id=5220195537520711716>⚡️</emoji> <b>Welcome to {bot_name}!</b>\n\n"
@@ -226,9 +236,11 @@ async def start_handler(client, message: Message):
 @app.on_message(filters.command("afs"))
 async def afs_link_handler(client, message: Message):
     user_id = message.from_user.id
-    if user_id in user_locks:
-        await message.reply_text("<emoji id=5402186569006210455>⏳</emoji> Please wait until your current download is complete.", parse_mode=ParseMode.HTML)
+    if ADMIN_IDS and user_id not in ADMIN_IDS:
+        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
         return
+
+
 
     parts = message.text.split()
     url = None
@@ -254,7 +266,7 @@ async def afs_link_handler(client, message: Message):
         return
 
     status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Processing AFS video...", parse_mode=ParseMode.HTML)
-    user_locks[user_id] = True
+
     filename = f"afs_video_{user_id}_{int(time.time())}.mp4"
     thumb_name = None
     title = "AFS Video"
@@ -357,16 +369,18 @@ async def afs_link_handler(client, message: Message):
     except Exception as e:
         await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> An error occurred.\n\nError: `{e}`", parse_mode=ParseMode.HTML)
     finally:
-        user_locks.pop(user_id, None)
+
         if os.path.exists(filename):
             os.remove(filename)
 
 @app.on_message(filters.command("rm"))
 async def rm_link_handler(client, message: Message):
     user_id = message.from_user.id
-    if user_id in user_locks:
-        await message.reply_text("<emoji id=5402186569006210455>⏳</emoji> Please wait until your current download is complete.", parse_mode=ParseMode.HTML)
+    if ADMIN_IDS and user_id not in ADMIN_IDS:
+        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
         return
+
+
 
     parts = message.text.split()
     url = None
@@ -392,7 +406,7 @@ async def rm_link_handler(client, message: Message):
         return
 
     status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Processing RM video...", parse_mode=ParseMode.HTML)
-    user_locks[user_id] = True
+
     filename = f"rm_video_{user_id}_{int(time.time())}.mp4"
     thumb_name = None
     title = "RM Video"
@@ -495,16 +509,18 @@ async def rm_link_handler(client, message: Message):
     except Exception:
         await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> <b>A processing error occurred.</b>", parse_mode=ParseMode.HTML)
     finally:
-        user_locks.pop(user_id, None)
+
         if os.path.exists(filename):
             os.remove(filename)
 
 @app.on_message(filters.command("shikho"))
 async def shikho_link_handler(client, message: Message):
     user_id = message.from_user.id
-    if user_id in user_locks:
-        await message.reply_text("<emoji id=5402186569006210455>⏳</emoji> Please wait until your current download is complete.", parse_mode=ParseMode.HTML)
+    if ADMIN_IDS and user_id not in ADMIN_IDS:
+        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
         return
+
+
 
     parts = message.text.split()
     url = None
@@ -530,7 +546,7 @@ async def shikho_link_handler(client, message: Message):
         return
 
     status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Processing Shikho video...", parse_mode=ParseMode.HTML)
-    user_locks[user_id] = True
+
     filename = f"shikho_video_{user_id}_{int(time.time())}.mp4"
     thumb_name = None
     title = "Shikho Video"
@@ -633,16 +649,18 @@ async def shikho_link_handler(client, message: Message):
     except Exception:
         await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> <b>A processing error occurred.</b>", parse_mode=ParseMode.HTML)
     finally:
-        user_locks.pop(user_id, None)
+
         if os.path.exists(filename):
             os.remove(filename)
 
 @app.on_message(filters.command("udvash"))
 async def udvash_link_handler(client, message: Message):
     user_id = message.from_user.id
-    if user_id in user_locks:
-        await message.reply_text("<emoji id=5402186569006210455>⏳</emoji> Please wait until your current download is complete.", parse_mode=ParseMode.HTML)
+    if ADMIN_IDS and user_id not in ADMIN_IDS:
+        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
         return
+
+
 
     parts = message.text.split()
     url = None
@@ -667,7 +685,7 @@ async def udvash_link_handler(client, message: Message):
         return
 
     status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Processing Udvash video...", parse_mode=ParseMode.HTML)
-    user_locks[user_id] = True
+
     filename = f"udvash_video_{user_id}_{int(time.time())}.mp4"
     thumb_name = None
     title = "Udvash Video"
@@ -755,7 +773,7 @@ async def udvash_link_handler(client, message: Message):
     except Exception:
         await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> <b>A processing error occurred.</b>", parse_mode=ParseMode.HTML)
     finally:
-        user_locks.pop(user_id, None)
+
         if os.path.exists(filename):
             os.remove(filename)
 
@@ -764,8 +782,13 @@ from pyrogram.enums import MessageEntityType, ParseMode
 @app.on_message(filters.command("id"))
 async def get_emoji_id(client, message: Message):
     target = message.reply_to_message if message.reply_to_message else message
-    
+    user_id = message.from_user.id
+    if ADMIN_IDS and user_id not in ADMIN_IDS:
+        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
+        return
+
     # Log to console for debugging
+
     print(f"--- DEBUG ID COMMAND ---")
     print(f"Target Msg ID: {target.id}")
     print(f"Entities: {target.entities}")
@@ -821,6 +844,7 @@ if __name__ == "__main__":
     flask_thread.start()
     
     print("Flask server started at http://localhost:8080")
+
     print("Bot is running...")
     
     app.run()
