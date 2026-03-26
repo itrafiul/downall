@@ -928,11 +928,12 @@ async def yt_link_handler(client, message: Message):
     # Construct yt-dlp command
     cmd = [
         "yt-dlp",
-        "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+        "-f", "best[height<=720]/best",
         "-o", filename,
         "--no-playlist",
         "--merge-output-format", "mp4",
         "--no-check-certificate",
+        "--geo-bypass",
         "--concurrent-fragments", "10"
     ]
     cmd.append(url)
@@ -943,7 +944,12 @@ async def yt_link_handler(client, message: Message):
         returncode, stderr = await download_with_progress(cmd, message, status_msg)
         
         if returncode != 0 or not os.path.exists(filename):
-            await status_msg.edit_text(f"<emoji id=5274099962655816924>❌</emoji> <b>Download failed!</b>\n\nThe video might be restricted or inaccessible.", parse_mode=ParseMode.HTML)
+            error_details = stderr.decode(errors="ignore")[:200] if stderr else "No error details."
+            await status_msg.edit_text(
+                f"<emoji id=5274099962655816924>❌</emoji> <b>Download failed!</b>\n\n"
+                f"<b>Error:</b>\n<code>{error_details}</code>", 
+                parse_mode=ParseMode.HTML
+            )
             return
 
         await status_msg.edit_text("<emoji id=5449683594425410231>📤</emoji> Uploading to Telegram...", parse_mode=ParseMode.HTML)
