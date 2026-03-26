@@ -288,6 +288,7 @@ async def start_handler(client, message: Message):
         f"I'm your ultimate companion for high-speed, high-quality video downloads. <emoji id=5217880283860194582>🚀</emoji> Whatever you need, I capture it with precision! <emoji id=5222044641200720562>🌸</emoji>\n\n"
         f"<b>Available Services:</b>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>RM Downloader:</b> <code>/rm [link]</code>\n"
+        f" <emoji id=5206607081334906820>✔️</emoji> <b>RM JSON:</b> <code>/rmd (reply to JSON)</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Shikho:</b> <code>/shikho [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Udvash:</b> <code>/udvash [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>AFS Downloader:</b> <code>/afs [link]</code>\n"
@@ -1020,6 +1021,183 @@ async def get_emoji_id(client, message: Message):
             response.append(f"ℹ️ <i>Found {len(entities)} other entities, but none are custom emojis.</i>")
     
     await message.reply_text("\n".join(response), parse_mode=ParseMode.HTML)
+
+@app.on_message(filters.command("rmd"))
+async def rmd_json_handler(client: Client, message: Message):
+    user_id = message.from_user.id
+    if ADMIN_IDS and user_id not in ADMIN_IDS:
+        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
+        return
+
+    # Check if replied to a document
+    if not message.reply_to_message or not message.reply_to_message.document:
+        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please reply to a JSON file with /rmd", parse_mode=ParseMode.HTML)
+        return
+
+    if not message.reply_to_message.document.file_name.endswith(".json"):
+        await message.reply_text("<emoji id=5274099962655816924>❌</emoji> Only JSON files are supported.", parse_mode=ParseMode.HTML)
+        return
+
+    status_msg = await message.reply_text("<emoji id=5231012545799666522>📥</emoji> Downloading JSON file...", parse_mode=ParseMode.HTML)
+    
+    json_path = await client.download_media(message.reply_to_message)
+    
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        videos = data.get("videos", [])
+        if not videos:
+            await status_msg.edit_text("<emoji id=5274099962655816924>❌</emoji> No videos found in JSON.", parse_mode=ParseMode.HTML)
+            return
+
+        total = len(videos)
+        await status_msg.edit_text(f"<emoji id=5429381339851796035>✅</emoji> Found {total} videos. Starting sequential processing...", parse_mode=ParseMode.HTML)
+        
+        referer = "https://iframe.mediadelivery.net"
+        
+        for index, video in enumerate(videos, 1):
+            url = video.get("videoURL") or video.get("url")
+            title = video.get("videoTitle") or video.get("title", f"Video {index}")
+            thumbnail_url = video.get("bunnyThumbnailURL") or video.get("thumbnail")
+            
+            if not url:
+                continue
+
+            # Update progress status
+            await status_msg.edit_text(
+                f"<b>🔄 Processing Video {index}/{total}</b>\n\n"
+                f"🎬 <b>Title:</b> <code>{title}</code>\n"
+                f"<emoji id=5231012545799666522>🔍</emoji> Preparing download...",
+                parse_mode=ParseMode.HTML
+            )
+
+            filename = f"rmd_video_{user_id}_{int(time.time())}_{index}.mp4"
+            thumb_name = None
+            
+            try:
+                # Download thumbnail if available
+                if thumbnail_url:
+                    thumb_name = f"rmd_thumb_{user_id}_{int(time.time())}_{index}.jpg"
+                    async with httpx.AsyncClient(timeout=20) as client_dl:
+                        try:
+                            r_thumb = await client_dl.get(thumbnail_url)
+                            if r_thumb.status_code == 200:
+                                with open(thumb_name, "wb") as f_thumb:
+                                    f_thumb.write(r_thumb.content)
+                            else:
+                                thumb_name = None
+                        except:
+                            thumb_name = None
+
+                # Construct yt-dlp command
+                cmd = [
+                    "yt-dlp",
+                    "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+                    "-o", filename,
+                    "--no-playlist",
+                    "--merge-output-format", "mp4",
+                    "--referer", referer,
+                    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                    "--add-header", "Origin: https://iframe.mediadelivery.net",
+                    "--no-check-certificate",
+                    "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL",
+                    "--concurrent-fragments", "10",
+                    url
+                ]
+                
+                # Update status for downloading
+                await status_msg.edit_text(
+                    f"<b>📥 Downloading {index}/{total}...</b>\n\n"
+                    f"🎬 <code>{title}</code>",
+                    parse_mode=ParseMode.HTML
+                )
+                
+                returncode, stderr = await download_with_progress(cmd, message, status_msg)
+                
+                if returncode != 0 or not os.path.exists(filename):
+                    await client.send_message(
+                        message.chat.id, 
+                        f"❌ <b>Failed to download:</b> <code>{title}</code>",
+                        reply_to_message_id=message.id,
+                        parse_mode=ParseMode.HTML
+                    )
+                    continue
+
+                # Uploading
+                await status_msg.edit_text(
+                    f"<b>📤 Uploading {index}/{total}...</b>\n\n"
+                    f"🎬 <code>{title}</code>",
+                    parse_mode=ParseMode.HTML
+                )
+                
+                width, height, duration = await get_video_metadata(filename)
+                user_name = message.from_user.first_name or message.from_user.username or "User"
+                
+                # Extract extra materials
+                lecture_sheet = video.get("videoLectureSheetURL")
+                note = video.get("videoNoteURL")
+                practice_sheet = video.get("videoPracticeSheetURL")
+                solve_sheet = video.get("videoSolveSheetURL")
+                
+                # Extract chapter
+                video_chapter = video.get("videoChapter")
+                chapter_name = video_chapter.get("chapterName") if isinstance(video_chapter, dict) else None
+
+                # Build caption in specific order
+                rich_caption = f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
+                
+                if chapter_name:
+                    rich_caption += f"<emoji id=5616035041446077536>📗</emoji> <b>Chapter:</b> <code>{chapter_name}</code>\n"
+                
+                # Material Links
+                if lecture_sheet and lecture_sheet.strip():
+                    rich_caption += f"  <emoji id=5215527339173155702>📄</emoji> <a href='{lecture_sheet}'>Lecture Sheet</a>\n"
+                if note and note.strip():
+                    rich_caption += f"  <emoji id=5215527339173155702>📝</emoji> <a href='{note}'>Class Note</a>\n"
+                if practice_sheet and practice_sheet.strip():
+                    rich_caption += f"  <emoji id=5215527339173155702>✍️</emoji> <a href='{practice_sheet}'>Practice Sheet</a>\n"
+                if solve_sheet and solve_sheet.strip():
+                    rich_caption += f"  <emoji id=5215527339173155702>✅</emoji> <a href='{solve_sheet}'>Solve Sheet</a>\n"
+
+                # Downloaded by at the end
+                rich_caption += f"\n<emoji id=5251203410396458957>👤</emoji> <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
+
+                start_upload = time.time()
+                await send_video_with_fallback(
+                    client=client,
+                    chat_id=message.chat.id,
+                    filepath=filename,
+                    thumb=thumb_name,
+                    caption=rich_caption,
+                    duration=duration,
+                    width=width,
+                    height=height,
+                    reply_to_id=message.id,
+                    progress=upload_progress,
+                    progress_args=(client, status_msg, start_upload)
+                )
+                
+            except Exception as e:
+                await client.send_message(
+                    message.chat.id,
+                    f"⚠️ <b>Error processing video {index}:</b> `{e}`",
+                    reply_to_message_id=message.id,
+                    parse_mode=ParseMode.HTML
+                )
+            finally:
+                if os.path.exists(filename):
+                    os.remove(filename)
+                if thumb_name and os.path.exists(thumb_name):
+                    os.remove(thumb_name)
+        
+        await status_msg.edit_text(f"<emoji id=5429381339851796035>✨</emoji> <b>All {total} videos processed successfully!</b>", parse_mode=ParseMode.HTML)
+
+    except Exception as e:
+        await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> Error reading JSON: `{e}`", parse_mode=ParseMode.HTML)
+    finally:
+        if os.path.exists(json_path):
+            os.remove(json_path)
 
 # =================== Main ===================
 if __name__ == "__main__":
