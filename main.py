@@ -1153,13 +1153,13 @@ async def rmd_json_handler(client: Client, message: Message):
                 
                 # Material Links
                 if lecture_sheet and lecture_sheet.strip():
-                    rich_caption += f"  <emoji id=5346105514575025401>➡️</emoji> <a href='{lecture_sheet}'>Lecture Sheet</a>\n"
+                    rich_caption += f"  <emoji id=5346105514575025401>➡️</emoji> <b>Lecture Sheet:</b> {lecture_sheet}\n"
                 if note and note.strip():
-                    rich_caption += f"  <emoji id=5346105514575025401>➡️</emoji> <a href='{note}'>Class Note</a>\n"
+                    rich_caption += f"  <emoji id=5346105514575025401>➡️</emoji> <b>Class Note:</b> {note}\n"
                 if practice_sheet and practice_sheet.strip():
-                    rich_caption += f"  <emoji id=5346105514575025401>➡️</emoji> <a href='{practice_sheet}'>Practice Sheet</a>\n"
+                    rich_caption += f"  <emoji id=5346105514575025401>➡️</emoji> <b>Practice Sheet:</b> {practice_sheet}\n"
                 if solve_sheet and solve_sheet.strip():
-                    rich_caption += f"  <emoji id=5346105514575025401>➡️</emoji> <a href='{solve_sheet}'>Solve Sheet</a>\n"
+                    rich_caption += f"  <emoji id=5346105514575025401>➡️</emoji> <b>Solve Sheet:</b> {solve_sheet}\n"
 
                 # Downloaded by at the end
                 rich_caption += f"\n<emoji id=5251203410396458957>👤</emoji> <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
