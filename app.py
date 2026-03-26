@@ -45,9 +45,11 @@ def health_check():
     return "OK", 200
 
 def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-
-    flask_app.run(host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 8000))
+    try:
+        flask_app.run(host="0.0.0.0", port=port)
+    except Exception as e:
+        print(f"⚠️ Flask could not start on port {port}: {e}")
 
 # =================== Progress ===================
 def progress_bar(percent):
@@ -904,21 +906,23 @@ async def process_single_video(client, chat_id, video, index, total, user_id, us
             if os.path.exists(filename): os.remove(filename)
             if thumb_name and os.path.exists(thumb_name): os.remove(thumb_name)
 
-@app.on_message(filters.command("dn") & filters.reply)
+@app.on_message(filters.command("dn"))
 async def batch_dn_handler(client, message: Message):
     user_id = message.from_user.id
     if ADMIN_IDS and user_id not in ADMIN_IDS:
         await message.reply_text("❌ **Access Denied!**")
         return
 
-    replied = message.reply_to_message
-    if not replied.document or not replied.document.file_name.lower().endswith(".json"):
-        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please reply to a JSON file containing video data.", parse_mode=ParseMode.HTML)
+    # Check if replied message OR current message has the document
+    target = message.reply_to_message or message
+    
+    if not target.document or not target.document.file_name.lower().endswith(".json"):
+        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please reply to a JSON file OR upload a JSON file with /dn in the caption.", parse_mode=ParseMode.HTML)
         return
 
     status_msg = await message.reply_text("<emoji id=5231012545799666522>📥</emoji> Downloading and parsing JSON...", parse_mode=ParseMode.HTML)
     
-    json_path = await replied.download()
+    json_path = await target.download()
     
     try:
         with open(json_path, 'r', encoding='utf-8') as f:
