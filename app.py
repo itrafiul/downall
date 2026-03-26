@@ -116,6 +116,10 @@ async def get_video_metadata(filepath):
         duration_int = int(duration) if duration > 0 else None
         
         return width, height, duration_int
+    except Exception as e:
+        print(f"Error in get_video_metadata for {filepath}: {e}")
+        return None, None, None
+
 async def send_video_with_fallback(client, chat_id, filepath, thumb, caption, duration, width, height, reply_to_id=None, progress=None, progress_args=()):
     try:
         return await client.send_video(
