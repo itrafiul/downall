@@ -119,24 +119,100 @@ async def get_video_metadata(filepath):
         print(f"Error in get_video_metadata for {filepath}: {e}")
         return 0, 0, 0
 
-async def send_video_with_fallback(client, chat_id, filepath, thumb, caption, duration, width, height, reply_to_id=None, progress=None, progress_args=()):
-    """Tries to send a video, falls back to document if failed, and handles None values for metadata."""
+async def send_video_with_fallback(client, chat_id, filepath, thumb, caption, duration, width, height, reply_to_id=None, progress=None, progress_args=None):
+    """
+    Tries to send a video to Telegram, falling back to document if it fails.
+    Automatically splits files larger than 2GB (2000MB) into 1800MB parts.
+    """
+    file_size = os.path.getsize(filepath)
+    limit_2gb = 2000 * 1024 * 1024 # 2000MB as requested
+    part_size = 1800 * 1024 * 1024 # 1800MB per part
+
     # Pyrogram requires duration/width/height to be integers (not None) for some backends
     final_duration = int(duration) if duration else 0
     final_width = int(width) if width else 0
     final_height = int(height) if height else 0
 
+    if file_size > limit_2gb:
+        # We need to split the video
+        print(f"File size {file_size} exceeds 2GB. Splitting into {part_size}MB parts.")
+        
+        # Calculate parts based on size ratio
+        num_parts = math.ceil(file_size / part_size)
+        duration_per_part = final_duration / num_parts
+        
+        # Update status message if available
+        if progress_args and len(progress_args) >= 2:
+            try:
+                status_msg = progress_args[1]
+                await status_msg.edit_text(f"📏 <b>File > 2GB!</b> Splitting into {num_parts} parts...", parse_mode=ParseMode.HTML)
+            except: pass
+
+        for i in range(num_parts):
+            start_time = i * duration_per_part
+            part_filename = f"{os.path.splitext(filepath)[0]}_part{i+1}.mp4"
+            
+            # Construct ffmpeg split command: -ss start -t duration -c copy
+            # Note: -ss before -i is faster but might be slightly inaccurate, 
+            # -ss after -i is slower but more accurate. We'll use -ss before for speed.
+            split_cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(start_time),
+                "-t", str(duration_per_part),
+                "-i", filepath,
+                "-c", "copy", # No re-encoding for speed
+                "-map", "0",
+                part_filename
+            ]
+            
+            process = await asyncio.create_subprocess_exec(
+                *split_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if not os.path.exists(part_filename) or os.path.getsize(part_filename) < 1000:
+                print(f"Error splitting part {i+1}: {stderr.decode()}")
+                continue
+            
+            part_caption = f"{caption}\n\n📦 <b>Part {i+1} of {num_parts}</b>"
+            
+            # Send each part
+            # Use fallback for each part too (sometimes parts are still problematic)
+            # Recursion is safe here with 1 level
+            await send_video_with_fallback(
+                client=client,
+                chat_id=chat_id,
+                filepath=part_filename,
+                thumb=thumb,
+                caption=part_caption,
+                duration=int(duration_per_part),
+                width=final_width,
+                height=final_height,
+                reply_to_id=reply_to_id,
+                progress=progress,
+                progress_args=progress_args
+            )
+            
+            # Cleanup part file
+            if os.path.exists(part_filename):
+                os.remove(part_filename)
+        
+        return # Finished processing all parts
+
+    # Standard upload (<= 2GB) logic continues below
     try:
         return await client.send_video(
             chat_id=chat_id,
             video=filepath,
             thumb=thumb,
             caption=caption,
-            parse_mode=ParseMode.HTML,
             duration=final_duration,
             width=final_width,
             height=final_height,
             supports_streaming=True,
+            parse_mode=ParseMode.HTML,
             reply_to_message_id=reply_to_id,
             progress=progress,
             progress_args=progress_args
