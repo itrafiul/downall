@@ -161,14 +161,14 @@ async def send_video_with_fallback(client, chat_id, filepath, thumb, caption, du
             if v_duration <= 0:
                 print("Splitting Error: No duration found.")
                 if progress_args and len(progress_args) >= 2:
-                    await progress_args[1].edit_text("❌ <b>Splitting Error:</b> Could not detect video duration.\nTrying whole document...", parse_mode=ParseMode.HTML)
+                    await progress_args[1].edit_text("<emoji id=5210952531676504517>❌</emoji> <b>Splitting Error:</b> Could not detect video duration.\nTrying whole document...", parse_mode=ParseMode.HTML)
             else:
                 num_parts = int(math.ceil(file_size / part_size_target))
                 seconds_per_part = v_duration / num_parts
                 
                 if progress_args and len(progress_args) >= 2:
                     status_msg = progress_args[1]
-                    await status_msg.edit_text(f"📏 <b>File > 2GB!</b> Splitting into {num_parts} parts...", parse_mode=ParseMode.HTML)
+                    await status_msg.edit_text(f"<emoji id=5271604874419647061>📏</emoji>   <b>File > 2GB!</b> Splitting into {num_parts} parts...", parse_mode=ParseMode.HTML)
 
                 success_count = 0
                 ffmpeg_path = shutil.which("ffmpeg") or "ffmpeg"
@@ -197,7 +197,7 @@ async def send_video_with_fallback(client, chat_id, filepath, thumb, caption, du
                     
                     if os.path.exists(part_filename) and os.path.getsize(part_filename) > 50000:
                         success_count += 1
-                        part_caption = f"{caption}\n\n📦 <b>Part {i+1} of {num_parts}</b>"
+                        part_caption = f"{caption}\n\n <emoji id=5213157963023273778>💔</emoji> <b>Part {i+1} of {num_parts}</b>"
                         
                         await send_video_with_fallback(
                             client=client, chat_id=chat_id, filepath=part_filename,
