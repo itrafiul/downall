@@ -85,6 +85,7 @@ async def upload_progress(current, total, client, message, start_time):
             pass
 
 async def get_video_metadata(filepath):
+    """Extract width, height, and duration from video file using ffprobe."""
     try:
         cmd = [
             "ffprobe", "-v", "quiet", "-print_format", "json",
@@ -97,10 +98,10 @@ async def get_video_metadata(filepath):
         )
         stdout, stderr = await process.communicate()
         if process.returncode != 0:
-            return None, None, None
+            return 0, 0, 0
         
         data = json.loads(stdout)
-        width = height = duration = None
+        width = height = duration = 0
         
         for stream in data.get("streams", []):
             if stream.get("codec_type") == "video":
@@ -111,16 +112,25 @@ async def get_video_metadata(filepath):
                     height = int(h)
                 break
                 
-        duration = float(data.get("format", {}).get("duration", 0))
-        # Ensure duration is at least 1 for Telegram
-        duration_int = int(duration) if duration > 0 else None
+        duration_val = data.get("format", {}).get("duration")
+        if duration_val:
+            duration = int(float(duration_val))
         
-        return width, height, duration_int
+        return width, height, duration
+    except FileNotFoundError:
+        print("DEBUG: ffprobe not found in system path.")
+        return 0, 0, 0
     except Exception as e:
         print(f"Error in get_video_metadata for {filepath}: {e}")
-        return None, None, None
+        return 0, 0, 0
 
 async def send_video_with_fallback(client, chat_id, filepath, thumb, caption, duration, width, height, reply_to_id=None, progress=None, progress_args=()):
+    """Tries to send a video, falls back to document if failed, and handles None values for metadata."""
+    # Pyrogram requires duration/width/height to be integers (not None) for some backends
+    final_duration = int(duration) if duration else 0
+    final_width = int(width) if width else 0
+    final_height = int(height) if height else 0
+
     try:
         return await client.send_video(
             chat_id=chat_id,
@@ -128,9 +138,9 @@ async def send_video_with_fallback(client, chat_id, filepath, thumb, caption, du
             thumb=thumb,
             caption=caption,
             parse_mode=ParseMode.HTML,
-            duration=duration,
-            width=width,
-            height=height,
+            duration=final_duration,
+            width=final_width,
+            height=final_height,
             supports_streaming=True,
             reply_to_message_id=reply_to_id,
             progress=progress,
@@ -138,24 +148,38 @@ async def send_video_with_fallback(client, chat_id, filepath, thumb, caption, du
         )
     except Exception as e:
         print(f"send_video failed: {e}. Falling back to send_document.")
-        # Try finding the status message in progress_args to update it if available
+        
+        # Update status message if available
         if progress_args and len(progress_args) >= 2:
             try:
                 status_msg = progress_args[1]
                 await status_msg.edit_text(f"⚠️ <b>Video upload failed!</b> Retrying as document...", parse_mode=ParseMode.HTML)
-            except:
-                pass
-        
-        return await client.send_document(
-            chat_id=chat_id,
-            document=filepath,
-            thumb=thumb,
-            caption=caption,
-            parse_mode=ParseMode.HTML,
-            reply_to_message_id=reply_to_id,
-            progress=progress,
-            progress_args=progress_args
-        )
+            except: pass
+
+        try:
+            # First try sending document with thumbnail
+            return await client.send_document(
+                chat_id=chat_id,
+                document=filepath,
+                thumb=thumb,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+                reply_to_message_id=reply_to_id,
+                progress=progress,
+                progress_args=progress_args
+            )
+        except Exception as doc_error:
+            print(f"send_document WITH thumb failed: {doc_error}. Retrying WITHOUT thumb.")
+            # Final attempt: Send document without any extra attributes that might cause invalidity
+            return await client.send_document(
+                chat_id=chat_id,
+                document=filepath,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+                reply_to_message_id=reply_to_id,
+                progress=progress,
+                progress_args=progress_args
+            )
 
 def parse_yt_dlp_progress(line):
     import re
@@ -917,11 +941,11 @@ async def process_single_video(client, chat_id, video, index, total, user_id, us
         
         # Safe defaults if metadata fails
         if not duration or duration <= 0:
-            duration = None
+            duration = 0
         if not width or width <= 0:
-            width = None
+            width = 0
         if not height or height <= 0:
-            height = None
+            height = 0
 
         course = video.get("videoCourse", {}).get("courseName", "N/A")
         subject = video.get("videoSubject", {}).get("subjectName", "N/A")
