@@ -1144,24 +1144,25 @@ async def rmd_json_handler(client: Client, message: Message):
                 video_chapter = video.get("videoChapter")
                 chapter_name = video_chapter.get("chapterName") if isinstance(video_chapter, dict) else None
 
-                # Build caption in specific order
-                rich_caption = f"🎬 <b>Title:</b> <code>{title}</code>\n"
-                
+                # Build caption in specific order: Chapter then Title
+                rich_caption = ""
                 if chapter_name:
-                    rich_caption += f"📗 <b>Chapter:</b> <code>{chapter_name}</code>\n"
+                    rich_caption += f"<emoji id=5395444784611480792>✏️</emoji> <b>Chapter:</b> <code>{chapter_name}</code>\n"
+                
+                rich_caption += f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
                 
                 # Material Links
                 if lecture_sheet and lecture_sheet.strip():
-                    rich_caption += f"  📄 <a href='{lecture_sheet}'>Lecture Sheet</a>\n"
+                    rich_caption += f"  <emoji id=5346105514575025401>➡️</emoji> <a href='{lecture_sheet}'>Lecture Sheet</a>\n"
                 if note and note.strip():
-                    rich_caption += f"  📝 <a href='{note}'>Class Note</a>\n"
+                    rich_caption += f"  <emoji id=5346105514575025401>➡️</emoji> <a href='{note}'>Class Note</a>\n"
                 if practice_sheet and practice_sheet.strip():
-                    rich_caption += f"  ✍️ <a href='{practice_sheet}'>Practice Sheet</a>\n"
+                    rich_caption += f"  <emoji id=5346105514575025401>➡️</emoji> <a href='{practice_sheet}'>Practice Sheet</a>\n"
                 if solve_sheet and solve_sheet.strip():
-                    rich_caption += f"  ✅ <a href='{solve_sheet}'>Solve Sheet</a>\n"
+                    rich_caption += f"  <emoji id=5346105514575025401>➡️</emoji> <a href='{solve_sheet}'>Solve Sheet</a>\n"
 
                 # Downloaded by at the end
-                rich_caption += f"\n👤 <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
+                rich_caption += f"\n<emoji id=5251203410396458957>👤</emoji> <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
 
                 start_upload = time.time()
                 await send_video_with_fallback(
