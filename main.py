@@ -922,25 +922,24 @@ async def yt_link_handler(client, message: Message):
             try: process_meta.kill() # Stop the stuck process
             except: pass
             print("YouTube metadata dump timeout. Proceeding with defaults.")
-        except Exception as e:
-            print(f"Metadata extraction error: {e}")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Metadata extraction error: {e}")
 
-        # Construct yt-dlp command
-        cmd = [
-            "yt-dlp",
-            "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
-            "-o", filename,
-            "--no-playlist",
-            "--merge-output-format", "mp4",
-            "--no-check-certificate",
-            "--concurrent-fragments", "10"
-        ]
-        cmd.append(url)
-        
-        await status_msg.edit_text("<emoji id=5429381339851796035>✅</emoji> Found! Downloading to server...", parse_mode=ParseMode.HTML)
-        
+    # Construct yt-dlp command
+    cmd = [
+        "yt-dlp",
+        "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+        "-o", filename,
+        "--no-playlist",
+        "--merge-output-format", "mp4",
+        "--no-check-certificate",
+        "--concurrent-fragments", "10"
+    ]
+    cmd.append(url)
+    
+    await status_msg.edit_text("<emoji id=5429381339851796035>✅</emoji> Found! Downloading to server...", parse_mode=ParseMode.HTML)
+    
+    try:
         returncode, stderr = await download_with_progress(cmd, message, status_msg)
         
         if returncode != 0 or not os.path.exists(filename):
@@ -971,7 +970,6 @@ async def yt_link_handler(client, message: Message):
             progress_args=(client, status_msg, start_upload)
         )
         await status_msg.delete()
-
     except Exception as e:
         await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> An error occurred.\n\nError: `{e}`", parse_mode=ParseMode.HTML)
     finally:
