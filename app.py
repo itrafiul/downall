@@ -782,129 +782,126 @@ async def udvash_link_handler(client, message: Message):
 
 # =================== Batch Processor ===================
 
-async def process_single_video(client, chat_id, video, index, total, user_id, user_name, semaphore):
-    async with semaphore:
-        title = video.get("videoTitle", "Untitled Video")
-        video_url = video.get("videoURL")
+async def process_single_video(client, chat_id, video, index, total, user_id, user_name):
+    title = video.get("videoTitle", "Untitled Video")
+    video_url = video.get("videoURL")
+    
+    if not video_url or "iframe.mediadelivery.net" not in video_url:
+        return
+
+    status_msg = await client.send_message(chat_id, f"<b>[{index}/{total}]</b> 🔍 Processing: <code>{title}</code>", parse_mode=ParseMode.HTML)
+    
+    filename = f"batch_video_{user_id}_{index}_{int(time.time())}.mp4"
+    thumb_name = None
+    
+    referer = "https://iframe.mediadelivery.net"
+    
+    try:
+        # Metadata fetch
+        headers = [
+            "--referer", referer,
+            "--add-header", "Origin: https://iframe.mediadelivery.net",
+            "--add-header", "Accept: */*",
+            "--add-header", "Accept-Language: en-US,en;q=0.9",
+            "--add-header", "Sec-Fetch-Site: cross-site",
+            "--add-header", "Sec-Fetch-Mode: cors",
+        ]
+
+        metadata_cmd = [
+            "yt-dlp", "--dump-json", "--no-check-certificate", 
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        ] + headers + [video_url]
+
+        process_meta = await asyncio.create_subprocess_exec(
+            *metadata_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout_meta, _ = await process_meta.communicate()
         
-        if not video_url or "iframe.mediadelivery.net" not in video_url:
-            # Skip non-Bunny CDN URLs as requested
+        if process_meta.returncode == 0:
+            try:
+                metadata = json.loads(stdout_meta.decode())
+                thumbnail_url = metadata.get("thumbnail")
+                if thumbnail_url:
+                    thumb_name = f"batch_thumb_{user_id}_{index}_{int(time.time())}.jpg"
+                    async with httpx.AsyncClient(timeout=20) as client_dl:
+                        r_thumb = await client_dl.get(thumbnail_url)
+                        if r_thumb.status_code == 200:
+                            with open(thumb_name, "wb") as f:
+                                f.write(r_thumb.content)
+                        else:
+                            thumb_name = None
+            except:
+                pass
+
+        # Download
+        cmd = [
+            "yt-dlp",
+            "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "-o", filename,
+            "--no-playlist",
+            "--merge-output-format", "mp4",
+            "--no-check-certificate",
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "--concurrent-fragments", "10",
+            "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL"
+        ] + headers + [video_url]
+
+        await status_msg.edit_text(f"<b>[{index}/{total}]</b> 📥 Downloading: <code>{title}</code>", parse_mode=ParseMode.HTML)
+        
+        returncode, stderr = await download_with_progress(cmd, status_msg, status_msg)
+        
+        if returncode != 0 or not os.path.exists(filename):
+            await status_msg.edit_text(f"❌ <b>[{index}/{total}]</b> Download Failed: <code>{title}</code>", parse_mode=ParseMode.HTML)
             return
 
-        status_msg = await client.send_message(chat_id, f"<b>[{index}/{total}]</b> 🔍 Processing: <code>{title}</code>", parse_mode=ParseMode.HTML)
+        # Upload
+        await status_msg.edit_text(f"<b>[{index}/{total}]</b> 📤 Uploading: <code>{title}</code>", parse_mode=ParseMode.HTML)
         
-        filename = f"batch_video_{user_id}_{index}_{int(time.time())}.mp4"
-        thumb_name = None
+        width, height, duration = await get_video_metadata(filename)
         
-        referer = "https://iframe.mediadelivery.net"
+        course = video.get("videoCourse", {}).get("courseName", "N/A")
+        subject = video.get("videoSubject", {}).get("subjectName", "N/A")
+        chapter = video.get("videoChapter", {}).get("chapterName", "N/A")
+        lecture_sheet = video.get("videoLectureSheetURL", "")
+        practice_sheet = video.get("videoPracticeSheetURL", "")
+        solve_sheet = video.get("videoSolveSheetURL", "")
+        note_sheet = video.get("videoNoteURL", "")
+
+        caption = f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
+        if course != "N/A": caption += f"<emoji id=5251203410396458957>📚</emoji> <b>Course:</b> {course}\n"
+        if subject != "N/A": caption += f"<emoji id=5251203410396458957>📖</emoji> <b>Subject:</b> {subject}\n"
+        if chapter != "N/A": caption += f"<emoji id=5251203410396458957>🔖</emoji> <b>Chapter:</b> {chapter}\n"
         
-        try:
-            # Metadata fetch
-            headers = [
-                "--referer", referer,
-                "--add-header", "Origin: https://iframe.mediadelivery.net",
-                "--add-header", "Accept: */*",
-                "--add-header", "Accept-Language: en-US,en;q=0.9",
-                "--add-header", "Sec-Fetch-Site: cross-site",
-                "--add-header", "Sec-Fetch-Mode: cors",
-            ]
+        if lecture_sheet: caption += f"\n<emoji id=5213233633803893325>📄</emoji> <a href='{lecture_sheet}'>Lecture Sheet</a>"
+        if practice_sheet: caption += f"\n<emoji id=5213233633803893325>📝</emoji> <a href='{practice_sheet}'>Practice Sheet</a>"
+        if solve_sheet: caption += f"\n<emoji id=5213233633803893325>✅</emoji> <a href='{solve_sheet}'>Solve Sheet</a>"
+        if note_sheet: caption += f"\n<emoji id=5213233633803893325>📓</emoji> <a href='{note_sheet}'>Note Sheet</a>"
+        
+        caption += f"\n\n<emoji id=5251203410396458957>👤</emoji> <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
 
-            metadata_cmd = [
-                "yt-dlp", "--dump-json", "--no-check-certificate", 
-                "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            ] + headers + [video_url]
+        start_upload = time.time()
+        await client.send_video(
+            chat_id=chat_id,
+            video=filename,
+            thumb=thumb_name,
+            caption=caption,
+            parse_mode=ParseMode.HTML,
+            duration=duration,
+            width=width,
+            height=height,
+            supports_streaming=True,
+            progress=upload_progress,
+            progress_args=(client, status_msg, start_upload)
+        )
+        await status_msg.delete()
 
-            process_meta = await asyncio.create_subprocess_exec(
-                *metadata_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout_meta, _ = await process_meta.communicate()
-            
-            if process_meta.returncode == 0:
-                try:
-                    metadata = json.loads(stdout_meta.decode())
-                    thumbnail_url = metadata.get("thumbnail")
-                    if thumbnail_url:
-                        thumb_name = f"batch_thumb_{user_id}_{index}_{int(time.time())}.jpg"
-                        async with httpx.AsyncClient(timeout=20) as client_dl:
-                            r_thumb = await client_dl.get(thumbnail_url)
-                            if r_thumb.status_code == 200:
-                                with open(thumb_name, "wb") as f:
-                                    f.write(r_thumb.content)
-                            else:
-                                thumb_name = None
-                except:
-                    pass
-
-            # Download
-            cmd = [
-                "yt-dlp",
-                "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
-                "-o", filename,
-                "--no-playlist",
-                "--merge-output-format", "mp4",
-                "--no-check-certificate",
-                "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                "--concurrent-fragments", "10",
-                "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL"
-            ] + headers + [video_url]
-
-            await status_msg.edit_text(f"<b>[{index}/{total}]</b> 📥 Downloading: <code>{title}</code>", parse_mode=ParseMode.HTML)
-            
-            returncode, stderr = await download_with_progress(cmd, status_msg, status_msg)
-            
-            if returncode != 0 or not os.path.exists(filename):
-                await status_msg.edit_text(f"❌ <b>[{index}/{total}]</b> Download Failed: <code>{title}</code>", parse_mode=ParseMode.HTML)
-                return
-
-            # Upload
-            await status_msg.edit_text(f"<b>[{index}/{total}]</b> 📤 Uploading: <code>{title}</code>", parse_mode=ParseMode.HTML)
-            
-            width, height, duration = await get_video_metadata(filename)
-            
-            # Extract addition data for caption
-            course = video.get("videoCourse", {}).get("courseName", "N/A")
-            subject = video.get("videoSubject", {}).get("subjectName", "N/A")
-            chapter = video.get("videoChapter", {}).get("chapterName", "N/A")
-            lecture_sheet = video.get("videoLectureSheetURL", "")
-            practice_sheet = video.get("videoPracticeSheetURL", "")
-            solve_sheet = video.get("videoSolveSheetURL", "")
-            note_sheet = video.get("videoNoteURL", "")
-
-            caption = f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
-            if course != "N/A": caption += f"<emoji id=5251203410396458957>📚</emoji> <b>Course:</b> {course}\n"
-            if subject != "N/A": caption += f"<emoji id=5251203410396458957>📖</emoji> <b>Subject:</b> {subject}\n"
-            if chapter != "N/A": caption += f"<emoji id=5251203410396458957>🔖</emoji> <b>Chapter:</b> {chapter}\n"
-            
-            if lecture_sheet: caption += f"\n<emoji id=5213233633803893325>📄</emoji> <a href='{lecture_sheet}'>Lecture Sheet</a>"
-            if practice_sheet: caption += f"\n<emoji id=5213233633803893325>📝</emoji> <a href='{practice_sheet}'>Practice Sheet</a>"
-            if solve_sheet: caption += f"\n<emoji id=5213233633803893325>✅</emoji> <a href='{solve_sheet}'>Solve Sheet</a>"
-            if note_sheet: caption += f"\n<emoji id=5213233633803893325>📓</emoji> <a href='{note_sheet}'>Note Sheet</a>"
-            
-            caption += f"\n\n<emoji id=5251203410396458957>👤</emoji> <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
-
-            start_upload = time.time()
-            await client.send_video(
-                chat_id=chat_id,
-                video=filename,
-                thumb=thumb_name,
-                caption=caption,
-                parse_mode=ParseMode.HTML,
-                duration=duration,
-                width=width,
-                height=height,
-                supports_streaming=True,
-                progress=upload_progress,
-                progress_args=(client, status_msg, start_upload)
-            )
-            await status_msg.delete()
-
-        except Exception as e:
-            await client.send_message(chat_id, f"⚠️ <b>[{index}/{total}]</b> Error: <code>{title}</code>\n`{e}`", parse_mode=ParseMode.HTML)
-        finally:
-            if os.path.exists(filename): os.remove(filename)
-            if thumb_name and os.path.exists(thumb_name): os.remove(thumb_name)
+    except Exception as e:
+        await client.send_message(chat_id, f"⚠️ <b>[{index}/{total}]</b> Error: <code>{title}</code>\n`{e}`", parse_mode=ParseMode.HTML)
+    finally:
+        if os.path.exists(filename): os.remove(filename)
+        if thumb_name and os.path.exists(thumb_name): os.remove(thumb_name)
 
 @app.on_message(filters.command("dn"))
 async def batch_dn_handler(client, message: Message):
@@ -936,14 +933,12 @@ async def batch_dn_handler(client, message: Message):
         total = len(videos)
         await status_msg.edit_text(f"<emoji id=5429381339851796035>✅</emoji> Found <b>{total}</b> videos. Starting parallel processing (max 3 at a time)...", parse_mode=ParseMode.HTML)
         
-        semaphore = asyncio.Semaphore(3) # Max 3 parallel tasks
         user_name = message.from_user.first_name or "User"
         
-        tasks = []
+        # Process videos one by one as requested
         for index, video in enumerate(videos, 1):
-            tasks.append(process_single_video(client, message.chat.id, video, index, total, user_id, user_name, semaphore))
+            await process_single_video(client, message.chat.id, video, index, total, user_id, user_name)
             
-        await asyncio.gather(*tasks)
         await message.reply_text(f"🏁 <b>Batch production complete!</b>\nAll {total} videos processed.", parse_mode=ParseMode.HTML)
         
     except Exception as e:
