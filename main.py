@@ -198,6 +198,9 @@ def parse_yt_dlp_progress(line):
     }
 
 async def download_with_progress(cmd, message, status_msg):
+    if os.path.exists("cookies.txt"):
+        cmd.extend(["--cookies", "cookies.txt"])
+    
     process = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
@@ -883,8 +886,11 @@ async def yt_link_handler(client, message: Message):
             "--dump-json",
             "--no-check-certificate",
             "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            url
         ]
+        if os.path.exists("cookies.txt"):
+            metadata_cmd.extend(["--cookies", "cookies.txt"])
+        
+        metadata_cmd.append(url)
         
         process_meta = await asyncio.create_subprocess_exec(
             *metadata_cmd,
@@ -1032,6 +1038,45 @@ async def get_emoji_id(client, message: Message):
             response.append(f"ℹ️ <i>Found {len(entities)} other entities, but none are custom emojis.</i>")
     
     await message.reply_text("\n".join(response), parse_mode=ParseMode.HTML)
+
+@app.on_message(filters.document)
+async def cookies_handler(client, message: Message):
+    user_id = message.from_user.id
+    if ADMIN_IDS and user_id not in ADMIN_IDS:
+        return
+    
+    file_name = message.document.file_name
+    if file_name in ["cookies.txt", "cookies.json"]:
+        status = await message.reply_text(f"📥 **Processing {file_name}...**", parse_mode=ParseMode.HTML)
+        path = await client.download_media(message)
+        
+        if file_name == "cookies.json":
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                
+                with open("cookies.txt", "w", encoding="utf-8") as f:
+                    # Write Netscape header
+                    f.write("# Netscape HTTP Cookie File\n# This is a generated file! Do not edit.\n\n")
+                    for cookie in data:
+                        domain = str(cookie.get("domain", ""))
+                        flag = "TRUE" if domain.startswith(".") else "FALSE"
+                        p = str(cookie.get("path", "/"))
+                        s = "TRUE" if cookie.get("secure") else "FALSE"
+                        e = int(cookie.get("expirationDate", 0))
+                        n = str(cookie.get("name", ""))
+                        v = str(cookie.get("value", ""))
+                        f.write(f"{domain}\t{flag}\t{p}\t{s}\t{e}\t{n}\t{v}\n")
+                
+                if os.path.exists(path): os.remove(path)
+                await status.edit_text("✅ **cookies.json converted to cookies.txt successfully!**\n\nYouTube downloads will now use these session cookies.", parse_mode=ParseMode.HTML)
+                return
+            except Exception as e:
+                await status.edit_text(f"❌ **Error converting cookies.json:** `{e}`", parse_mode=ParseMode.HTML)
+                if os.path.exists(path): os.remove(path)
+                return
+
+        await status.edit_text("✅ **cookies.txt has been updated successfully!**", parse_mode=ParseMode.HTML)
 
 @app.on_message(filters.command("rmd"))
 async def rmd_json_handler(client: Client, message: Message):
