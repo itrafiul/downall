@@ -1,5 +1,7 @@
 import os
 import time
+import math
+import shutil
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -147,75 +149,75 @@ async def send_video_with_fallback(client, chat_id, filepath, thumb, caption, du
 
     if file_size > limit_2gb:
         print(f"File size {file_size} exceeds 2GB. Attempting to split...")
-        
-        # Ensure we have a valid duration
-        v_duration = float(duration) if duration else 0
-        if v_duration <= 0:
-            v_duration = await get_duration_with_ffprobe(filepath)
+        try:
+            # Ensure we have a valid duration
+            v_duration = float(duration) if duration else 0
             if v_duration <= 0:
-                print("STILL no duration. Trying metadata helper as last resort.")
-                _, _, v_duration = await get_video_metadata(filepath)
+                v_duration = await get_duration_with_ffprobe(filepath)
+                if v_duration <= 0:
+                    print("STILL no duration. Trying metadata helper.")
+                    _, _, v_duration = await get_video_metadata(filepath)
 
-        if v_duration <= 0:
-            msg_text = "❌ <b>Splitting Error:</b> Could not detect video duration/length.\nFallback to whole document..."
-            if progress_args: await progress_args[1].edit_text(msg_text, parse_mode=ParseMode.HTML)
-            print(msg_text)
-        else:
-            num_parts = math.ceil(file_size / part_size_target)
-            seconds_per_part = v_duration / num_parts
-            
-            if progress_args and len(progress_args) >= 2:
-                try:
+            if v_duration <= 0:
+                print("Splitting Error: No duration found.")
+                if progress_args and len(progress_args) >= 2:
+                    await progress_args[1].edit_text("❌ <b>Splitting Error:</b> Could not detect video duration.\nTrying whole document...", parse_mode=ParseMode.HTML)
+            else:
+                num_parts = int(math.ceil(file_size / part_size_target))
+                seconds_per_part = v_duration / num_parts
+                
+                if progress_args and len(progress_args) >= 2:
                     status_msg = progress_args[1]
                     await status_msg.edit_text(f"📏 <b>File > 2GB!</b> Splitting into {num_parts} parts...", parse_mode=ParseMode.HTML)
-                except: pass
 
-            success_count = 0
-            for i in range(num_parts):
-                start_time = i * seconds_per_part
-                part_filename = f"{os.path.splitext(filepath)[0]}_part{i+1}.mp4"
+                success_count = 0
+                ffmpeg_path = shutil.which("ffmpeg") or "ffmpeg"
                 
-                # Command: -i input -ss start -t duration -c copy
-                # Using -ss AFTER -i is slower but usually works for ALL formats/codecs when concatenating/splitting
-                split_cmd = [
-                    "ffmpeg", "-y",
-                    "-i", filepath,
-                    "-ss", str(start_time),
-                    "-t", str(seconds_per_part),
-                    "-c", "copy",
-                    "-map", "0",
-                    "-ignore_unknown",
-                    part_filename
-                ]
-                
-                process = await asyncio.create_subprocess_exec(
-                    *split_cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                _, stderr = await process.communicate()
-                
-                if os.path.exists(part_filename) and os.path.getsize(part_filename) > 50000: # Min 50KB
-                    success_count += 1
-                    part_caption = f"{caption}\n\n📦 <b>Part {i+1} of {num_parts}</b>"
+                for i in range(num_parts):
+                    start_time = i * seconds_per_part
+                    part_filename = f"{os.path.splitext(filepath)[0]}_part{i+1}.mp4"
                     
-                    await send_video_with_fallback(
-                        client=client, chat_id=chat_id, filepath=part_filename,
-                        thumb=thumb, caption=part_caption, duration=int(seconds_per_part),
-                        width=final_width, height=final_height, reply_to_id=reply_to_id,
-                        progress=progress, progress_args=progress_args
+                    split_cmd = [
+                        ffmpeg_path, "-y",
+                        "-i", filepath,
+                        "-ss", str(start_time),
+                        "-t", str(seconds_per_part),
+                        "-c", "copy",
+                        "-map", "0",
+                        "-ignore_unknown",
+                        part_filename
+                    ]
+                    
+                    process = await asyncio.create_subprocess_exec(
+                        *split_cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
                     )
-                    if os.path.exists(part_filename): os.remove(part_filename)
-                else:
-                    err_msg = stderr.decode()[:200]
-                    print(f"Part {i+1} failed creation: {err_msg}")
+                    _, stderr = await process.communicate()
+                    
+                    if os.path.exists(part_filename) and os.path.getsize(part_filename) > 50000:
+                        success_count += 1
+                        part_caption = f"{caption}\n\n📦 <b>Part {i+1} of {num_parts}</b>"
+                        
+                        await send_video_with_fallback(
+                            client=client, chat_id=chat_id, filepath=part_filename,
+                            thumb=thumb, caption=part_caption, duration=int(seconds_per_part),
+                            width=final_width, height=final_height, reply_to_id=reply_to_id,
+                            progress=progress, progress_args=progress_args
+                        )
+                        if os.path.exists(part_filename): os.remove(part_filename)
+                    else:
+                        print(f"Part {i+1} failed: {stderr.decode()[:100]}")
 
-            if success_count > 0:
-                return # Done
-            else:
-                print("All parts failed creation. Proceeding to standard upload attempt.")
+                if success_count > 0:
+                    return # Successfully uploaded parts
+                    
+        except Exception as split_err:
+            print(f"Fatal error in split logic: {split_err}")
+            if progress_args and len(progress_args) >= 2:
+                await progress_args[1].edit_text(f"⚠️ <b>Split Crash:</b> `{split_err}`\nRetrying standard...", parse_mode=ParseMode.HTML)
 
-    # Standard upload logic (<= 2GB or failed split fallback)
+    # Standard upload logic
     try:
         return await client.send_video(
             chat_id=chat_id,
