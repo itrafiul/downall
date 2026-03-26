@@ -51,7 +51,10 @@ def run_flask():
     except Exception as e:
         print(f"⚠️ Flask could not start on port {port}: {e}")
 
-# =================== Progress ===================
+# Concurrent processing semaphore for batch downloads
+batch_semaphore = asyncio.Semaphore(3)
+
+# =================== Progress Tracking ===================
 def progress_bar(percent):
     done = int(percent / 5)
     return "▓" * done + "░" * (20 - done)
@@ -295,7 +298,8 @@ async def start_handler(client, message: Message):
         f" <emoji id=5206607081334906820>✔️</emoji> <b>RM Downloader:</b> <code>/rm [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Shikho:</b> <code>/shikho [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Udvash:</b> <code>/udvash [link]</code>\n"
-        f" <emoji id=5206607081334906820>✔️</emoji> <b>AFS Downloader:</b> <code>/afs [link]</code>\n\n"
+        f" <emoji id=5206607081334906820>✔️</emoji> <b>AFS Downloader:</b> <code>/afs [link]</code>\n"
+        f" <emoji id=5206607081334906820>✔️</emoji> <b>YouTube:</b> <code>/yt [link]</code>\n\n"
         f"<i>Just send me a link and let the magic happen!</i> <emoji id=5220166546491459639>🔥</emoji>"
     )
     await message.reply_text(welcome_text, parse_mode=ParseMode.HTML)
@@ -421,17 +425,16 @@ async def afs_link_handler(client, message: Message):
         )
 
         start_upload = time.time()
-        await client.send_video(
+        await send_video_with_fallback(
+            client=client,
             chat_id=message.chat.id,
-            video=filename,
+            filepath=filename,
             thumb=thumb_name,
             caption=rich_caption,
-            parse_mode=ParseMode.HTML,
             duration=duration,
             width=width,
             height=height,
-            supports_streaming=True,
-            reply_to_message_id=message.id,
+            reply_to_id=message.id,
             progress=upload_progress,
             progress_args=(client, status_msg, start_upload)
         )
@@ -561,17 +564,16 @@ async def rm_link_handler(client, message: Message):
         )
 
         start_upload = time.time()
-        await client.send_video(
+        await send_video_with_fallback(
+            client=client,
             chat_id=message.chat.id,
-            video=filename,
+            filepath=filename,
             thumb=thumb_name,
             caption=rich_caption,
-            parse_mode=ParseMode.HTML,
             duration=duration,
             width=width,
             height=height,
-            supports_streaming=True,
-            reply_to_message_id=message.id,
+            reply_to_id=message.id,
             progress=upload_progress,
             progress_args=(client, status_msg, start_upload)
         )
@@ -701,17 +703,16 @@ async def shikho_link_handler(client, message: Message):
         )
 
         start_upload = time.time()
-        await client.send_video(
+        await send_video_with_fallback(
+            client=client,
             chat_id=message.chat.id,
-            video=filename,
+            filepath=filename,
             thumb=thumb_name,
             caption=rich_caption,
-            parse_mode=ParseMode.HTML,
             duration=duration,
             width=width,
             height=height,
-            supports_streaming=True,
-            reply_to_message_id=message.id,
+            reply_to_id=message.id,
             progress=upload_progress,
             progress_args=(client, status_msg, start_upload)
         )
@@ -825,17 +826,16 @@ async def udvash_link_handler(client, message: Message):
         )
 
         start_upload = time.time()
-        await client.send_video(
+        await send_video_with_fallback(
+            client=client,
             chat_id=message.chat.id,
-            video=filename,
+            filepath=filename,
             thumb=thumb_name,
             caption=rich_caption,
-            parse_mode=ParseMode.HTML,
             duration=duration,
             width=width,
             height=height,
-            supports_streaming=True,
-            reply_to_message_id=message.id,
+            reply_to_id=message.id,
             progress=upload_progress,
             progress_args=(client, status_msg, start_upload)
         )
@@ -847,6 +847,128 @@ async def udvash_link_handler(client, message: Message):
 
         if os.path.exists(filename):
             os.remove(filename)
+
+@app.on_message(filters.command("yt"))
+async def yt_link_handler(client, message: Message):
+    user_id = message.from_user.id
+    if ADMIN_IDS and user_id not in ADMIN_IDS:
+        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
+        return
+
+    parts = message.text.split()
+    url = None
+    
+    if len(parts) >= 2:
+        url = parts[1]
+        
+    if not url and message.reply_to_message and message.reply_to_message.text:
+        url = message.reply_to_message.text.strip()
+        
+    if not url:
+        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please provide a YouTube URL.\nUsage: /yt <URL>", parse_mode=ParseMode.HTML)
+        return
+
+    # URL Validation
+    allowed_domains = ["youtube.com", "youtu.be"]
+    if not any(domain in url for domain in allowed_domains):
+        await message.reply_text(
+            "<emoji id=5274099962655816924>❌</emoji> <b>Invalid URL!</b>\n\nOnly YouTube URLs are allowed for this command.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Processing YouTube video...", parse_mode=ParseMode.HTML)
+
+    filename = f"yt_video_{user_id}_{int(time.time())}.mp4"
+    thumb_name = None
+    title = "YouTube Video"
+    
+    try:
+        # Fetch metadata using yt-dlp
+        metadata_cmd = [
+            "yt-dlp",
+            "--dump-json",
+            "--no-check-certificate",
+            url
+        ]
+        
+        process_meta = await asyncio.create_subprocess_exec(
+            *metadata_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout_meta, stderr_meta = await process_meta.communicate()
+        
+        if process_meta.returncode == 0:
+            try:
+                metadata = json.loads(stdout_meta.decode())
+                title = metadata.get("title", "YouTube Video")
+                thumbnail_url = metadata.get("thumbnail")
+                
+                if thumbnail_url:
+                    thumb_name = f"yt_thumb_{user_id}_{int(time.time())}.jpg"
+                    async with httpx.AsyncClient(timeout=20) as client_dl:
+                        r_thumb = await client_dl.get(thumbnail_url)
+                        if r_thumb.status_code == 200:
+                            with open(thumb_name, "wb") as f:
+                                f.write(r_thumb.content)
+                        else:
+                            thumb_name = None
+            except Exception:
+                pass
+
+        # Construct yt-dlp command
+        cmd = [
+            "yt-dlp",
+            "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "-o", filename,
+            "--no-playlist",
+            "--merge-output-format", "mp4",
+            "--no-check-certificate",
+            "--concurrent-fragments", "10"
+        ]
+        cmd.append(url)
+        
+        await status_msg.edit_text("<emoji id=5429381339851796035>✅</emoji> Found! Downloading to server...", parse_mode=ParseMode.HTML)
+        
+        returncode, stderr = await download_with_progress(cmd, message, status_msg)
+        
+        if returncode != 0 or not os.path.exists(filename):
+            await status_msg.edit_text(f"<emoji id=5274099962655816924>❌</emoji> <b>Download failed!</b>\n\nThe video might be restricted or inaccessible.", parse_mode=ParseMode.HTML)
+            return
+
+        await status_msg.edit_text("<emoji id=5449683594425410231>📤</emoji> Uploading to Telegram...", parse_mode=ParseMode.HTML)
+        
+        width, height, duration = await get_video_metadata(filename)
+        user_name = message.from_user.first_name or message.from_user.username or "User"
+        rich_caption = (
+            f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
+            f"<emoji id=5251203410396458957>👤</emoji> <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
+        )
+
+        start_upload = time.time()
+        await send_video_with_fallback(
+            client=client,
+            chat_id=message.chat.id,
+            filepath=filename,
+            thumb=thumb_name,
+            caption=rich_caption,
+            duration=duration,
+            width=width,
+            height=height,
+            reply_to_id=message.id,
+            progress=upload_progress,
+            progress_args=(client, status_msg, start_upload)
+        )
+        await status_msg.delete()
+
+    except Exception as e:
+        await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> An error occurred.\n\nError: `{e}`", parse_mode=ParseMode.HTML)
+    finally:
+        if os.path.exists(filename):
+            os.remove(filename)
+        if thumb_name and os.path.exists(thumb_name):
+            os.remove(thumb_name)
 
 # =================== Batch Processor ===================
 
@@ -903,25 +1025,32 @@ async def process_single_video(client, chat_id, video, index, total, user_id, us
             except:
                 pass
 
-        # Download
+        # Construct yt-dlp command (RM Style)
         cmd = [
             "yt-dlp",
             "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
             "-o", filename,
             "--no-playlist",
             "--merge-output-format", "mp4",
-            "--no-check-certificate",
+            "--referer", referer,
             "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "--concurrent-fragments", "10",
-            "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL"
-        ] + headers + [video_url]
+            "--add-header", "Origin: https://iframe.mediadelivery.net",
+            "--add-header", "Accept: */*",
+            "--add-header", "Accept-Language: en-US,en;q=0.9",
+            "--add-header", "Sec-Fetch-Site: cross-site",
+            "--add-header", "Sec-Fetch-Mode: cors",
+            "--no-check-certificate",
+            "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL",
+            "--concurrent-fragments", "10"
+        ]
+        cmd.append(video_url)
 
-        await status_msg.edit_text(f"<b>[{index}/{total}]</b> 📥 Downloading: <code>{title}</code>", parse_mode=ParseMode.HTML)
-        
-        returncode, stderr = await download_with_progress(cmd, status_msg, status_msg)
+        async with batch_semaphore:
+            await status_msg.edit_text(f"<b>[{index}/{total}]</b> 📥 Downloading: <code>{title}</code>", parse_mode=ParseMode.HTML)
+            returncode, stderr = await download_with_progress(cmd, client, status_msg)
         
         if returncode != 0 or not os.path.exists(filename):
-            await status_msg.edit_text(f"❌ <b>[{index}/{total}]</b> Download Failed: <code>{title}</code>", parse_mode=ParseMode.HTML)
+            await status_msg.edit_text(f"<b>[{index}/{total}]</b> ❌ Failed to download: <code>{title}</code>", parse_mode=ParseMode.HTML)
             return
 
         # Upload
@@ -1023,11 +1152,14 @@ async def batch_dn_handler(client, message: Message):
         
         user_name = message.from_user.first_name or "User"
         
-        # Process videos one by one as requested
+        tasks = []
         for index, video in enumerate(videos, 1):
-            await process_single_video(client, message.chat.id, video, index, total, user_id, user_name)
-            
-        await message.reply_text(f"🏁 <b>Batch production complete!</b>\nAll {total} videos processed.", parse_mode=ParseMode.HTML)
+            tasks.append(process_single_video(client, message.chat.id, video, index, total, user_id, user_name))
+        
+        # Run all tasks (semaphore inside each task limits concurrency)
+        await asyncio.gather(*tasks)
+        
+        await message.reply_text(f"✅ **Batch completed!** Processed {total} videos.", parse_mode=ParseMode.HTML)
         
     except Exception as e:
         await status_msg.edit_text(f"❌ <b>Error occurred:</b>\n<code>{e}</code>", parse_mode=ParseMode.HTML)
