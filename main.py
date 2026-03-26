@@ -886,6 +886,8 @@ async def yt_link_handler(client, message: Message):
             "--dump-json",
             "--no-check-certificate",
             "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "--extractor-args", "youtube:player_client=ios,android,web_creator",
+            "--add-header", "Accept-Language: en-US,en;q=0.9",
         ]
         if os.path.exists("cookies.txt"):
             metadata_cmd.extend(["--cookies", "cookies.txt"])
@@ -925,7 +927,7 @@ async def yt_link_handler(client, message: Message):
     except Exception as e:
         print(f"Metadata extraction error: {e}")
 
-    # Construct yt-dlp command
+    # Construct yt-dlp command with better bypasses
     cmd = [
         "yt-dlp",
         "-f", "best[height<=720]/best",
@@ -934,6 +936,8 @@ async def yt_link_handler(client, message: Message):
         "--merge-output-format", "mp4",
         "--no-check-certificate",
         "--geo-bypass",
+        "--extractor-args", "youtube:player_client=ios,android,web_creator",
+        "--add-header", "Accept-Language: en-US,en;q=0.9",
         "--concurrent-fragments", "10"
     ]
     cmd.append(url)
