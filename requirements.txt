@@ -7,3 +7,4 @@ TgCrypto
 python-dotenv
 pycryptodomex
 ffmpeg-python
+aiohttp
