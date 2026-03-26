@@ -862,7 +862,7 @@ async def yt_link_handler(client, message: Message):
         return
 
     # URL Validation
-    allowed_domains = ["youtube.com", "youtu.be"]
+    allowed_domains = ["youtube.com", "youtu.be", "m.youtube.com"]
     if not any(domain in url for domain in allowed_domains):
         await message.reply_text(
             "<emoji id=5274099962655816924>❌</emoji> <b>Invalid URL!</b>\n\nOnly YouTube URLs are allowed for this command.",
@@ -877,11 +877,12 @@ async def yt_link_handler(client, message: Message):
     title = "YouTube Video"
     
     try:
-        # Fetch metadata using yt-dlp
+        # Fetch metadata using yt-dlp with a timeout and better User-Agent
         metadata_cmd = [
             "yt-dlp",
             "--dump-json",
             "--no-check-certificate",
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             url
         ]
         
@@ -890,10 +891,11 @@ async def yt_link_handler(client, message: Message):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        stdout_meta, stderr_meta = await process_meta.communicate()
-        
-        if process_meta.returncode == 0:
-            try:
+        try:
+            # Adding a 15-second timeout for metadata to avoid being stuck forever
+            stdout_meta, stderr_meta = await asyncio.wait_for(process_meta.communicate(), timeout=30)
+            
+            if process_meta.returncode == 0:
                 metadata = json.loads(stdout_meta.decode())
                 title = metadata.get("title", "YouTube Video")
                 thumbnail_url = metadata.get("thumbnail")
@@ -901,14 +903,23 @@ async def yt_link_handler(client, message: Message):
                 if thumbnail_url:
                     thumb_name = f"yt_thumb_{user_id}_{int(time.time())}.jpg"
                     async with httpx.AsyncClient(timeout=20) as client_dl:
-                        r_thumb = await client_dl.get(thumbnail_url)
-                        if r_thumb.status_code == 200:
-                            with open(thumb_name, "wb") as f:
-                                f.write(r_thumb.content)
-                        else:
+                        try:
+                            r_thumb = await client_dl.get(thumbnail_url)
+                            if r_thumb.status_code == 200:
+                                with open(thumb_name, "wb") as f_thumb:
+                                    f_thumb.write(r_thumb.content)
+                            else:
+                                thumb_name = None
+                        except:
                             thumb_name = None
-            except Exception:
-                pass
+        except asyncio.TimeoutError:
+            try: process_meta.kill() # Stop the stuck process
+            except: pass
+            print("YouTube metadata dump timeout. Proceeding with defaults.")
+        except Exception as e:
+            print(f"Metadata extraction error: {e}")
+    except Exception:
+        pass
 
         # Construct yt-dlp command
         cmd = [
@@ -1091,20 +1102,28 @@ async def rmd_json_handler(client: Client, message: Message):
                             thumb_name = None
 
                 # Construct yt-dlp command
+                is_youtube = any(domain in url for domain in ["youtube.com", "youtu.be", "m.youtube.com"])
+                
                 cmd = [
                     "yt-dlp",
                     "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
                     "-o", filename,
                     "--no-playlist",
                     "--merge-output-format", "mp4",
-                    "--referer", referer,
-                    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                    "--add-header", "Origin: https://iframe.mediadelivery.net",
                     "--no-check-certificate",
-                    "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL",
-                    "--concurrent-fragments", "10",
-                    url
+                    "--concurrent-fragments", "10"
                 ]
+
+                # Add RM-specific headers only if NOT a YouTube link
+                if not is_youtube:
+                    cmd.extend([
+                        "--referer", referer,
+                        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                        "--add-header", "Origin: https://iframe.mediadelivery.net",
+                        "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL",
+                    ])
+                
+                cmd.append(url)
                 
                 # Update status for downloading
                 await status_msg.edit_text(
