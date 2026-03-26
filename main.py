@@ -1369,7 +1369,7 @@ async def rmall_handler(client: Client, message: Message):
                 returncode, stderr = await download_with_progress(cmd, message, status_msg)
                 
                 if returncode != 0 or not os.path.exists(filename):
-                    await client.send_message(message.chat.id, f"❌ <b>Fail:</b> <code>{title}</code>")
+                    await client.send_message(message.chat.id, f"<emoji id=5210952531676504517>❌</emoji> <b>Fail:</b> <code>{title}</code>")
                     continue
 
                 width, height, duration = await get_video_metadata(filename)
@@ -1381,17 +1381,17 @@ async def rmall_handler(client: Client, message: Message):
                 s_sheet = video.get("videoSolveSheetURL")
                 
                 # Build caption
-                rich_caption = f"<emoji id=5395444784611480792>✏️</emoji> <b>Subject:</b> <code>{subject_name}</code>\n"
+                rich_caption = f"<emoji id=5282843764451195532>🖥</emoji> <b>Subject:</b> <code>{subject_name}</code>\n"
                 rich_caption += f"<emoji id=5395444784611480792>✏️</emoji> <b>Chapter:</b> <code>{chapter_name}</code>\n"
-                rich_caption += f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
+                rich_caption += f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n\n"
                 
-                if l_sheet and l_sheet.strip(): rich_caption += f"  ➡️ <b>Lecture Sheet:</b> {l_sheet}\n"
-                if note and note.strip(): rich_caption += f"  ➡️ <b>Class Note:</b> {note}\n"
-                if p_sheet and p_sheet.strip(): rich_caption += f"  ➡️ <b>Practice Sheet:</b> {p_sheet}\n"
-                if s_sheet and s_sheet.strip(): rich_caption += f"  ➡️ <b>Solve Sheet:</b> {s_sheet}\n"
+                if l_sheet and l_sheet.strip(): rich_caption += f"  <emoji id=5346105514575025401>➡️</emoji> <b>Lecture Sheet:</b> {l_sheet}\n"
+                if note and note.strip(): rich_caption += f"  <emoji id=5346105514575025401>➡️</emoji> <b>Class Note:</b> {note}\n"
+                if p_sheet and p_sheet.strip(): rich_caption += f"  <emoji id=5346105514575025401>➡️</emoji> <b>Practice Sheet:</b> {p_sheet}\n"
+                if s_sheet and s_sheet.strip(): rich_caption += f"  <emoji id=5346105514575025401>➡️</emoji> <b>Solve Sheet:</b> {s_sheet}\n"
                 
                 user_name = message.from_user.first_name or "User"
-                rich_caption += f"\n👤 <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
+                rich_caption += f"\n <emoji id=5251203410396458957>👤</emoji> <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
 
                 start_upload = time.time()
                 await send_video_with_fallback(
@@ -1413,7 +1413,7 @@ async def rmall_handler(client: Client, message: Message):
             finally:
                 if os.path.exists(filename): os.remove(filename)
 
-        await status_msg.edit_text("✨ <b>All videos from Website Data processed!</b>")
+        await status_msg.edit_text(" <emoji id=5458603043203327669>🔔</emoji> <b>All videos from Website Data processed!</b>")
 
     except Exception as e:
         await status_msg.edit_text(f"⚠️ Error reading JSON: `{e}`")
