@@ -292,6 +292,7 @@ async def start_handler(client, message: Message):
         f"<b>Available Services:</b>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>RM Downloader:</b> <code>/rm [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>RM JSON:</b> <code>/rmd (reply to JSON)</code>\n"
+        f" <emoji id=5206607081334906820>✔️</emoji> <b>Full Website:</b> <code>/rmall (reply to ALL JSON)</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Shikho:</b> <code>/shikho [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Udvash:</b> <code>/udvash [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>AFS Downloader:</b> <code>/afs [link]</code>\n"
@@ -1275,6 +1276,149 @@ async def rmd_json_handler(client: Client, message: Message):
     finally:
         if os.path.exists(json_path):
             os.remove(json_path)
+
+@app.on_message(filters.command("rmall"))
+async def rmall_handler(client: Client, message: Message):
+    user_id = message.from_user.id
+    if ADMIN_IDS and user_id not in ADMIN_IDS:
+        await message.reply_text("❌ **Access Denied!**")
+        return
+
+    if not message.reply_to_message or not message.reply_to_message.document:
+        await message.reply_text("❗ Please reply to the `WEBSITE_ALL_DATA_FINAL.json` file with /rmall")
+        return
+
+    status_msg = await message.reply_text("📥 Processing total website data...")
+    json_path = await client.download_media(message.reply_to_message)
+    
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data_root = json.load(f)
+        
+        # Flatten the structure: data -> subjects -> chapters -> videos
+        all_videos = []
+        subjects = data_root.get("data", [])
+        
+        for sub in subjects:
+            sub_name = sub.get("subject_name", "Unknown Subject")
+            chapters = sub.get("chapters", [])
+            for chp in chapters:
+                chp_name = chp.get("chapter_name", "Unknown Chapter")
+                videos = chp.get("videos", [])
+                for vid in videos:
+                    # Enrich video object with metadata from parents
+                    vid["subject_name_ext"] = sub_name
+                    vid["chapter_name_ext"] = chp_name
+                    all_videos.append(vid)
+        
+        if not all_videos:
+            await status_msg.edit_text("❌ No videos found in the nested structure.")
+            return
+
+        total = len(all_videos)
+        await status_msg.edit_text(f"✅ Found {total} videos across all subjects. Starting processing...")
+        
+        referer = "https://iframe.mediadelivery.net"
+        
+        for index, video in enumerate(all_videos, 1):
+            url = video.get("original_url") or video.get("stream_url") or video.get("url")
+            title = video.get("title", f"Video {index}")
+            subject_name = video.get("subject_name_ext")
+            chapter_name = video.get("chapter_name_ext")
+            
+            if not url:
+                continue
+
+            await status_msg.edit_text(
+                f"<b>🔄 Processing {index}/{total}</b>\n"
+                f"📚 <b>Sub:</b> <code>{subject_name}</code>\n"
+                f"🎬 <b>Title:</b> <code>{title}</code>",
+                parse_mode=ParseMode.HTML
+            )
+
+            filename = f"rmall_video_{user_id}_{index}.mp4"
+            thumb_name = None # In this structure we don't usually have thumbs easily
+            
+            try:
+                # Construct yt-dlp command (using the same logic as /rmd for stealth)
+                is_youtube = any(domain in url for domain in ["youtube.com", "youtu.be", "m.youtube.com"])
+                
+                cmd = [
+                    "yt-dlp",
+                    "-f", "best[height<=720]/best",
+                    "-o", filename,
+                    "--no-playlist",
+                    "--merge-output-format", "mp4",
+                    "--no-check-certificate",
+                    "--geo-bypass",
+                    "--extractor-args", "youtube:player_client=android,web;player_skip=web,mweb",
+                    "--add-header", "Accept-Language: en-US,en;q=0.9",
+                    "--concurrent-fragments", "10"
+                ]
+                
+                if not is_youtube:
+                    cmd.extend([
+                        "--referer", referer,
+                        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                        "--add-header", "Origin: https://iframe.mediadelivery.net",
+                        "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL",
+                    ])
+                
+                cmd.append(url)
+                
+                returncode, stderr = await download_with_progress(cmd, message, status_msg)
+                
+                if returncode != 0 or not os.path.exists(filename):
+                    await client.send_message(message.chat.id, f"❌ <b>Fail:</b> <code>{title}</code>")
+                    continue
+
+                width, height, duration = await get_video_metadata(filename)
+                
+                # Material Links
+                l_sheet = video.get("videoLectureSheetURL")
+                note = video.get("videoNoteURL")
+                p_sheet = video.get("videoPracticeSheetURL")
+                s_sheet = video.get("videoSolveSheetURL")
+                
+                # Build caption
+                rich_caption = f"<emoji id=5395444784611480792>✏️</emoji> <b>Subject:</b> <code>{subject_name}</code>\n"
+                rich_caption += f"<emoji id=5395444784611480792>✏️</emoji> <b>Chapter:</b> <code>{chapter_name}</code>\n"
+                rich_caption += f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
+                
+                if l_sheet and l_sheet.strip(): rich_caption += f"  ➡️ <b>Lecture Sheet:</b> {l_sheet}\n"
+                if note and note.strip(): rich_caption += f"  ➡️ <b>Class Note:</b> {note}\n"
+                if p_sheet and p_sheet.strip(): rich_caption += f"  ➡️ <b>Practice Sheet:</b> {p_sheet}\n"
+                if s_sheet and s_sheet.strip(): rich_caption += f"  ➡️ <b>Solve Sheet:</b> {s_sheet}\n"
+                
+                user_name = message.from_user.first_name or "User"
+                rich_caption += f"\n👤 <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
+
+                start_upload = time.time()
+                await send_video_with_fallback(
+                    client=client,
+                    chat_id=message.chat.id,
+                    filepath=filename,
+                    thumb=None,
+                    caption=rich_caption,
+                    duration=duration,
+                    width=width,
+                    height=height,
+                    reply_to_id=message.id,
+                    progress=upload_progress,
+                    progress_args=(client, status_msg, start_upload)
+                )
+                
+            except Exception as e:
+                await client.send_message(message.chat.id, f"⚠️ Error video {index}: `{e}`")
+            finally:
+                if os.path.exists(filename): os.remove(filename)
+
+        await status_msg.edit_text("✨ <b>All videos from Website Data processed!</b>")
+
+    except Exception as e:
+        await status_msg.edit_text(f"⚠️ Error reading JSON: `{e}`")
+    finally:
+        if os.path.exists(json_path): os.remove(json_path)
 
 # =================== Main ===================
 if __name__ == "__main__":
