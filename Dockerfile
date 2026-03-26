@@ -1,23 +1,24 @@
-# Use an official Python runtime as a parent image
-FROM python:3.11-slim
+# ১. পাইথন ইমেজ ব্যবহার করা (Python 3.10)
+FROM python:3.10-slim
 
-# Install system dependencies (FFmpeg is required for video processing)
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set the working directory in the container
+# ২. কাজের ডিরেক্টরি সেট করা
 WORKDIR /app
 
-# Copy the current directory contents into the container at /app
-COPY . /app
+# ৩. সিস্টেমে FFmpeg এবং অন্যান্য প্রয়োজনীয় টুলস ইন্সটল করা (মাস্ট)
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    gcc \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install any needed packages specified in requirements.txt
+# ৪. লাইব্রেরি ফাইলগুলো কপি করা
+COPY requirements.txt .
+
+# ৫. সব লাইব্রেরি ইন্সটল করা
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Make port 8080 available to the world outside this container
-# (Render will provide the PORT env var, which the app will use)
-EXPOSE 8080
+# ৬. আপনার সব ফাইল কপি করা
+COPY . .
 
-# Run app.py when the container launches
+# ৭. বোট চালু করার কমান্ড
 CMD ["python", "app.py"]
