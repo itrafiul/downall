@@ -104,14 +104,54 @@ async def get_video_metadata(filepath):
         
         for stream in data.get("streams", []):
             if stream.get("codec_type") == "video":
-                width = int(stream.get("width"))
-                height = int(stream.get("height"))
+                w = stream.get("width")
+                h = stream.get("height")
+                if w and h:
+                    width = int(w)
+                    height = int(h)
                 break
                 
         duration = float(data.get("format", {}).get("duration", 0))
-        return width, height, int(duration)
-    except Exception:
-        return None, None, None
+        # Ensure duration is at least 1 for Telegram
+        duration_int = int(duration) if duration > 0 else None
+        
+        return width, height, duration_int
+async def send_video_with_fallback(client, chat_id, filepath, thumb, caption, duration, width, height, reply_to_id=None, progress=None, progress_args=()):
+    try:
+        return await client.send_video(
+            chat_id=chat_id,
+            video=filepath,
+            thumb=thumb,
+            caption=caption,
+            parse_mode=ParseMode.HTML,
+            duration=duration,
+            width=width,
+            height=height,
+            supports_streaming=True,
+            reply_to_message_id=reply_to_id,
+            progress=progress,
+            progress_args=progress_args
+        )
+    except Exception as e:
+        print(f"send_video failed: {e}. Falling back to send_document.")
+        # Try finding the status message in progress_args to update it if available
+        if progress_args and len(progress_args) >= 2:
+            try:
+                status_msg = progress_args[1]
+                await status_msg.edit_text(f"⚠️ <b>Video upload failed!</b> Retrying as document...", parse_mode=ParseMode.HTML)
+            except:
+                pass
+        
+        return await client.send_document(
+            chat_id=chat_id,
+            document=filepath,
+            thumb=thumb,
+            caption=caption,
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=reply_to_id,
+            progress=progress,
+            progress_args=progress_args
+        )
 
 def parse_yt_dlp_progress(line):
     import re
@@ -859,8 +899,26 @@ async def process_single_video(client, chat_id, video, index, total, user_id, us
         # Upload
         await status_msg.edit_text(f"<b>[{index}/{total}]</b> 📤 Uploading: <code>{title}</code>", parse_mode=ParseMode.HTML)
         
+        # Check file existence and size
+        if not os.path.exists(filename):
+             raise Exception("Video file not found after download.")
+        
+        file_size_mb = os.path.getsize(filename) / (1024 * 1024)
+        if file_size_mb < 0.01: # 10KB
+             raise Exception(f"Video file is too small ({file_size_mb:.4f} MB). Might be a corrupted download.")
+
+        print(f"Processing: {title} | Size: {file_size_mb:.2f} MB")
+        
         width, height, duration = await get_video_metadata(filename)
         
+        # Safe defaults if metadata fails
+        if not duration or duration <= 0:
+            duration = None
+        if not width or width <= 0:
+            width = None
+        if not height or height <= 0:
+            height = None
+
         course = video.get("videoCourse", {}).get("courseName", "N/A")
         subject = video.get("videoSubject", {}).get("subjectName", "N/A")
         chapter = video.get("videoChapter", {}).get("chapterName", "N/A")
@@ -868,7 +926,8 @@ async def process_single_video(client, chat_id, video, index, total, user_id, us
         practice_sheet = video.get("videoPracticeSheetURL", "")
         solve_sheet = video.get("videoSolveSheetURL", "")
         note_sheet = video.get("videoNoteURL", "")
-
+        
+        # ... truncated caption logic ...
         caption = f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
         if course != "N/A": caption += f"<emoji id=5251203410396458957>📚</emoji> <b>Course:</b> {course}\n"
         if subject != "N/A": caption += f"<emoji id=5251203410396458957>📖</emoji> <b>Subject:</b> {subject}\n"
@@ -882,22 +941,23 @@ async def process_single_video(client, chat_id, video, index, total, user_id, us
         caption += f"\n\n<emoji id=5251203410396458957>👤</emoji> <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
 
         start_upload = time.time()
-        await client.send_video(
+        await send_video_with_fallback(
+            client=client,
             chat_id=chat_id,
-            video=filename,
+            filepath=filename,
             thumb=thumb_name,
             caption=caption,
-            parse_mode=ParseMode.HTML,
             duration=duration,
             width=width,
             height=height,
-            supports_streaming=True,
             progress=upload_progress,
             progress_args=(client, status_msg, start_upload)
         )
         await status_msg.delete()
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         await client.send_message(chat_id, f"⚠️ <b>[{index}/{total}]</b> Error: <code>{title}</code>\n`{e}`", parse_mode=ParseMode.HTML)
     finally:
         if os.path.exists(filename): os.remove(filename)
