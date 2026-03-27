@@ -572,7 +572,7 @@ async def ba_link_handler(client, message: Message):
         # Construct yt-dlp command
         cmd = [
             "yt-dlp",
-            "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "-f", "best[height<=720]/best",
             "-o", filename,
             "--no-playlist",
             "--merge-output-format", "mp4",
@@ -580,10 +580,12 @@ async def ba_link_handler(client, message: Message):
             "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             "--add-header", f"Referer: {referer}",
             "--add-header", "Origin: https://biologyadda.com",
+            "--add-header", "X-Requested-With: XMLHttpRequest",
             "--add-header", "Accept: */*",
             "--add-header", "Accept-Language: en-US,en;q=0.9",
             "--add-header", "Sec-Fetch-Site: cross-site",
             "--add-header", "Sec-Fetch-Mode: cors",
+            "--add-header", "Sec-Fetch-Dest: empty",
             "--no-check-certificate",
             "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL",
             "--concurrent-fragments", "20",
