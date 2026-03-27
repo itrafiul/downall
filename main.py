@@ -387,7 +387,7 @@ async def start_handler(client, message: Message):
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Full Website:</b> <code>/rmall (reply to ALL JSON)</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Shikho:</b> <code>/shikho [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Udvash:</b> <code>/udvash [link]</code>\n"
-        f" <emoji id=5206607081334906820>✔️</emoji> <b>HK Downloader:</b> <code>/hk [link]</code>\n"
+        f" <emoji id=5206607081334906820>✔️</emoji> <b>Hulkstain Downloader:</b> <code>/hk [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>AFS Downloader:</b> <code>/afs [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>YouTube:</b> <code>/yt [link]</code>\n\n"
         f"<i>Just send me a link and let the magic happen!</i> <emoji id=5220166546491459639>🔥</emoji>"
@@ -1080,19 +1080,19 @@ async def yt_link_handler(client, message: Message):
         url = message.reply_to_message.text.strip()
         
     if not url:
-        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> বস, দয়া করে একটি YouTube লিংক দিন।\nব্যবহার: /yt <URL>", parse_mode=ParseMode.HTML)
+        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please provide a YouTube link.\nUsage: /yt <URL>", parse_mode=ParseMode.HTML)
         return
 
     # URL Validation
     allowed_domains = ["youtube.com", "youtu.be", "m.youtube.com", "y2u.be"]
     if not any(domain in url for domain in allowed_domains):
         await message.reply_text(
-            "<emoji id=5274099962655816924>❌</emoji> <b>ভুল লিংক!</b>\n\nএটি কোনো সঠিক YouTube লিংক নয়, বস!",
+            "<emoji id=5274099962655816924>❌</emoji> <b>Invalid Link!</b>\n\nThis is not a valid YouTube link, boss!",
             parse_mode=ParseMode.HTML
         )
         return
 
-    status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> <b>YouTube ভিডিও প্রসেস করা হচ্ছে... দয়া করে অপেক্ষা করুন!</b>", parse_mode=ParseMode.HTML)
+    status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> <b>Processing YouTube video... Please wait!</b>", parse_mode=ParseMode.HTML)
 
     filename = f"yt_video_{user_id}_{int(time.time())}.mp4"
     thumb_name = None
@@ -1151,7 +1151,7 @@ async def yt_link_handler(client, message: Message):
     # Construct yt-dlp command with max bypasses
     cmd = [
         "yt-dlp",
-        "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best",
+        "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best",
         "-o", filename,
         "--no-playlist",
         "--merge-output-format", "mp4",
@@ -1165,7 +1165,7 @@ async def yt_link_handler(client, message: Message):
     ]
     cmd.append(url)
     
-    await status_msg.edit_text("<emoji id=5429381339851796035>✅</emoji> <b>ভিডিও পাওয়া গেছে! ডাউনলোড শুরু হচ্ছে...</b>", parse_mode=ParseMode.HTML)
+    await status_msg.edit_text("<emoji id=5429381339851796035>✅</emoji> <b>Video found! Download starting...</b>", parse_mode=ParseMode.HTML)
     
     try:
         returncode, stderr = await download_with_progress(cmd, message, status_msg)
@@ -1173,13 +1173,13 @@ async def yt_link_handler(client, message: Message):
         if returncode != 0 or not os.path.exists(filename):
             error_details = stderr.decode(errors="ignore")[:200] if stderr else "No error details."
             await status_msg.edit_text(
-                f"<emoji id=5274099962655816924>❌</emoji> <b>ডাউনলোড ব্যর্থ হয়েছে! বস!</b>\n\n"
+                f"<emoji id=5274099962655816924>❌</emoji> <b>Download failed! Boss!</b>\n\n"
                 f"<b>Error:</b>\n<code>{error_details}</code>", 
                 parse_mode=ParseMode.HTML
             )
             return
 
-        await status_msg.edit_text("<emoji id=5449683594425410231>📤</emoji> <b>Telegram-এ আপলোড করা হচ্ছে...</b>", parse_mode=ParseMode.HTML)
+        await status_msg.edit_text("<emoji id=5449683594425410231>📤</emoji> <b>Uploading to Telegram...</b>", parse_mode=ParseMode.HTML)
         
         width, height, duration = await get_video_metadata(filename)
         user_name = message.from_user.first_name or message.from_user.username or "User"
@@ -1204,7 +1204,7 @@ async def yt_link_handler(client, message: Message):
         )
         await status_msg.delete()
     except Exception as e:
-        await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> একটি সমস্যা হয়েছে, বস।\n\nError: `{e}`", parse_mode=ParseMode.HTML)
+        await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> An error occurred, boss.\n\nError: `{e}`", parse_mode=ParseMode.HTML)
     finally:
         if os.path.exists(filename):
             os.remove(filename)
@@ -1379,25 +1379,35 @@ async def rmd_json_handler(client: Client, message: Message):
 
                 # Construct yt-dlp command
                 is_youtube = any(domain in url for domain in ["youtube.com", "youtu.be", "m.youtube.com"])
-                
-                cmd = [
-                    "yt-dlp",
-                    "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
-                    "-o", filename,
-                    "--no-playlist",
-                    "--merge-output-format", "mp4",
-                    "--no-check-certificate",
-                    "--concurrent-fragments", "10"
-                ]
-
-                # Add RM-specific headers only if NOT a YouTube link
-                if not is_youtube:
-                    cmd.extend([
+                if is_youtube:
+                    cmd = [
+                        "yt-dlp",
+                        "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best",
+                        "-o", filename,
+                        "--no-playlist",
+                        "--merge-output-format", "mp4",
+                        "--no-check-certificate",
+                        "--geo-bypass",
+                        "--extractor-args", "youtube:player_client=android,web;player_skip=web,mweb",
+                        "--add-header", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+                        "--add-header", "Accept-Language: en-US,en;q=0.9",
+                        "--add-header", "Sec-Fetch-Mode: navigate",
+                        "--concurrent-fragments", "10"
+                    ]
+                else:
+                    cmd = [
+                        "yt-dlp",
+                        "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+                        "-o", filename,
+                        "--no-playlist",
+                        "--merge-output-format", "mp4",
+                        "--no-check-certificate",
                         "--referer", referer,
                         "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                         "--add-header", "Origin: https://iframe.mediadelivery.net",
                         "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL",
-                    ])
+                        "--concurrent-fragments", "10"
+                    ]
                 
                 cmd.append(url)
                 
@@ -1558,29 +1568,38 @@ async def rmall_handler(client: Client, message: Message):
             thumb_name = None # In this structure we don't usually have thumbs easily
             
             try:
-                # Construct yt-dlp command (using the same logic as /rmd for stealth)
                 is_youtube = any(domain in url for domain in ["youtube.com", "youtu.be", "m.youtube.com"])
-                
-                cmd = [
-                    "yt-dlp",
-                    "-f", "best[height<=720]/best",
-                    "-o", filename,
-                    "--no-playlist",
-                    "--merge-output-format", "mp4",
-                    "--no-check-certificate",
-                    "--geo-bypass",
-                    "--extractor-args", "youtube:player_client=android,web;player_skip=web,mweb",
-                    "--add-header", "Accept-Language: en-US,en;q=0.9",
-                    "--concurrent-fragments", "10"
-                ]
-                
-                if not is_youtube:
-                    cmd.extend([
+                if is_youtube:
+                    cmd = [
+                        "yt-dlp",
+                        "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best",
+                        "-o", filename,
+                        "--no-playlist",
+                        "--merge-output-format", "mp4",
+                        "--no-check-certificate",
+                        "--geo-bypass",
+                        "--extractor-args", "youtube:player_client=android,web;player_skip=web,mweb",
+                        "--add-header", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+                        "--add-header", "Accept-Language: en-US,en;q=0.9",
+                        "--add-header", "Sec-Fetch-Mode: navigate",
+                        "--concurrent-fragments", "10"
+                    ]
+                else:
+                    cmd = [
+                        "yt-dlp",
+                        "-f", "best[height<=720]/best",
+                        "-o", filename,
+                        "--no-playlist",
+                        "--merge-output-format", "mp4",
+                        "--no-check-certificate",
+                        "--geo-bypass",
                         "--referer", referer,
                         "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                         "--add-header", "Origin: https://iframe.mediadelivery.net",
                         "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL",
-                    ])
+                        "--add-header", "Accept-Language: en-US,en;q=0.9",
+                        "--concurrent-fragments", "10"
+                    ]
                 
                 cmd.append(url)
                 
