@@ -549,63 +549,54 @@ async def ba_link_handler(client, message: Message):
 
     parts = message.text.split()
     player_url = None
-    referer = "https://biologyadda.com/"
     
     if len(parts) >= 2: player_url = parts[1]
     elif message.reply_to_message and message.reply_to_message.text:
         player_url = message.reply_to_message.text.strip()
         
     if not player_url:
-        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please provide a Biology Adda URL.\nUsage: /ba <URL>")
+        await message.reply_text(
+            "<emoji id=5274099962655816924>❗</emoji> <b>Please provide a Biology Adda URL.</b>\n\n"
+            "Usage:\n"
+            "• <code>/ba https://player.vidinfra.com/stream/.../...</code>\n"
+            "• <code>/ba https://biology-adda.tenbytecdn.com/{id}/playlist.m3u8</code>\n\n"
+            "<i>💡 To get the direct m3u8 link:\nOpen video in browser → F12 → Network tab → filter 'playlist.m3u8' → copy URL</i>",
+            parse_mode=ParseMode.HTML
+        )
         return
 
-    status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> <b>Extracting real stream URL...</b>", parse_mode=ParseMode.HTML)
+    import re as _re
+    real_m3u8 = None
+
+    # Case 1: User directly provided a tenbytecdn.com or m3u8 URL
+    if "tenbytecdn.com" in player_url or player_url.endswith(".m3u8"):
+        real_m3u8 = player_url.split("?")[0]  # Strip query params
+
+    # Case 2: Vidinfra player URL - try to construct m3u8 URL (may not always work)
+    elif "vidinfra.com" in player_url:
+        await message.reply_text(
+            "⚠️ <b>Vidinfra links cannot be downloaded directly.</b>\n\n"
+            "Please get the direct <b>m3u8 link</b> instead:\n"
+            "1️⃣ Open the video in your browser\n"
+            "2️⃣ Press <b>F12</b> → Network tab\n"
+            "3️⃣ Play the video, then filter by <code>playlist.m3u8</code>\n"
+            "4️⃣ Copy the URL (starts with <code>https://biology-adda.tenbytecdn.com/...</code>)\n"
+            "5️⃣ Send: <code>/ba [copied URL]</code>",
+            parse_mode=ParseMode.HTML
+        )
+        return
+    else:
+        await message.reply_text("<emoji id=5274099962655816924>❌</emoji> Unrecognized URL. Please provide a Biology Adda m3u8 link.")
+        return
+
+    status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> <b>Stream found! Downloading...</b>", parse_mode=ParseMode.HTML)
     filename = f"ba_video_{user_id}_{int(time.time())}.mp4"
     title = "Biology Adda Video"
     
     try:
-        import re as _re
-
-        # Step 1: Fetch the vidinfra player page and extract the real CDN m3u8 URL
-        real_m3u8 = None
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Referer": referer,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9"
-        }
-        
-        # Strip query params for cleaner request
-        clean_player_url = player_url.split("?")[0] if "?" in player_url else player_url
-        
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client_http:
-            r = await client_http.get(clean_player_url, headers=headers)
-            html = r.text
-        
-        # Look for tenbytecdn.com m3u8 URLs in the page source/JS
-        matches = _re.findall(r'https?://[a-zA-Z0-9._-]*tenbytecdn\.com/[^\s"\'<>]+playlist\.m3u8', html)
-        if matches:
-            real_m3u8 = matches[0]
-        else:
-            # Try to find any m3u8 URL in the page
-            matches = _re.findall(r'https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*', html)
-            if matches:
-                real_m3u8 = matches[0]
-        
-        if not real_m3u8:
-            await status_msg.edit_text(
-                "<emoji id=5274099962655816924>❌</emoji> <b>Could not extract stream URL!</b>\n\n"
-                "The player page did not contain a direct m3u8 link. The content may require login or is DRM protected.",
-                parse_mode=ParseMode.HTML
-            )
-            return
-
-        await status_msg.edit_text(f"<emoji id=5429381339851796035>✅</emoji> <b>Stream found! Downloading...</b>", parse_mode=ParseMode.HTML)
-        
-        # Step 2: Download the real m3u8 from tenbytecdn.com
         cmd = [
             "yt-dlp",
-            "-f", "best/bestvideo+bestaudio",
+            "-f", "best[height<=720]/best",
             "-o", filename,
             "--no-playlist",
             "--merge-output-format", "mp4",
