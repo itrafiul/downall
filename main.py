@@ -291,9 +291,7 @@ def parse_yt_dlp_progress(line):
 
 async def download_with_progress(cmd, message, status_msg):
     if os.path.exists("cookies.txt"):
-        # Insert cookies at the beginning to avoid flag order issues
-        cmd.insert(1, "cookies.txt")
-        cmd.insert(1, "--cookies")
+        cmd.extend(["--cookies", "cookies.txt"])
     
     process = await asyncio.create_subprocess_exec(
         *cmd,
@@ -390,8 +388,11 @@ async def start_handler(client, message: Message):
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Shikho:</b> <code>/shikho [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Udvash:</b> <code>/udvash [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Hulkstain Downloader:</b> <code>/hk [link]</code>\n"
+        f" <emoji id=5206607081334906820>✔️</emoji> <b>Biology Adda:</b> <code>/ba [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>AFS Downloader:</b> <code>/afs [link]</code>\n"
-        f" <emoji id=5206607081334906820>✔️</emoji> <b>YouTube:</b> <code>/yt [link]</code>\n\n"
+        f" <emoji id=5206607081334906820>✔️</emoji> <b>Facebook:</b> <code>/fb [link]</code>\n"
+        f" <emoji id=5206607081334906820>✔️</emoji> <b>Instagram:</b> <code>/ig [link]</code>\n"
+        f" <emoji id=5206607081334906820>✔️</emoji> <b>TikTok:</b> <code>/tik [link]</code>\n\n"
         f"<i>Just send me a link and let the magic happen!</i> <emoji id=5220166546491459639>🔥</emoji>"
     )
     await message.reply_text(welcome_text, parse_mode=ParseMode.HTML)
@@ -538,6 +539,83 @@ async def afs_link_handler(client, message: Message):
 
         if os.path.exists(filename):
             os.remove(filename)
+
+@app.on_message(filters.command("ba"))
+async def ba_link_handler(client, message: Message):
+    user_id = message.from_user.id
+    if ADMIN_IDS and user_id not in ADMIN_IDS:
+        await message.reply_text("❌ **Access Denied!**")
+        return
+
+    parts = message.text.split()
+    url = None
+    referer = "https://biologyadda.com/"
+    
+    if len(parts) >= 2: url = parts[1]
+    elif message.reply_to_message and message.reply_to_message.text:
+        url = message.reply_to_message.text.strip()
+        
+    if not url:
+        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please provide a Biology Adda URL.\nUsage: /ba <URL>")
+        return
+
+    # URL Validation
+    if "vidinfra.com" not in url:
+        await message.reply_text("<emoji id=5274099962655816924>❌</emoji> <b>Invalid URL!</b>\nPlease provide a Biology Adda (vidinfra) link.")
+        return
+
+    status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Processing Biology Adda video...", parse_mode=ParseMode.HTML)
+    filename = f"ba_video_{user_id}_{int(time.time())}.mp4"
+    title = "Biology Adda Video"
+    
+    try:
+        # Construct yt-dlp command
+        cmd = [
+            "yt-dlp",
+            "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "-o", filename,
+            "--no-playlist",
+            "--merge-output-format", "mp4",
+            "--referer", referer,
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "--add-header", "Origin: https://player.vidinfra.com",
+            "--no-check-certificate",
+            "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL",
+            "--concurrent-fragments", "20",
+            "--buffer-size", "1M"
+        ]
+        cmd.append(url)
+        
+        await status_msg.edit_text("<emoji id=5429381339851796035>✅</emoji> Found! Downloading to server...", parse_mode=ParseMode.HTML)
+        
+        returncode, stderr = await download_with_progress(cmd, message, status_msg)
+        
+        if returncode != 0 or not os.path.exists(filename):
+            await status_msg.edit_text(f"<emoji id=5274099962655816924>❌</emoji> <b>Download failed!</b>")
+            return
+
+        await status_msg.edit_text("<emoji id=5449683594425410231>📤</emoji> Uploading to Telegram...", parse_mode=ParseMode.HTML)
+        
+        width, height, duration = await get_video_metadata(filename)
+        user_name = message.from_user.first_name or "User"
+        rich_caption = (
+            f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
+            f"<emoji id=5251203410396458957>👤</emoji> <b>By:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
+        )
+
+        start_upload = time.time()
+        await send_video_with_fallback(
+            client=client, chat_id=message.chat.id, filepath=filename,
+            thumb=None, caption=rich_caption, duration=duration,
+            width=width, height=height, reply_to_id=message.id,
+            progress=upload_progress, progress_args=(client, status_msg, start_upload)
+        )
+        await status_msg.delete()
+
+    except Exception as e:
+        await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> Error: `{e}`")
+    finally:
+        if os.path.exists(filename): os.remove(filename)
 
 @app.on_message(filters.command("rm"))
 async def rm_link_handler(client, message: Message):
@@ -1158,13 +1236,13 @@ async def yt_link_handler(client, message: Message):
         "--merge-output-format", "mp4",
         "--no-check-certificate",
         "--geo-bypass",
-        "--force-ipv4",
         "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "--extractor-args", "youtube:player_client=android;player_skip=web,mweb",
+        "--extractor-args", "youtube:player_client=android,ios",
         "--add-header", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "--add-header", "Accept-Language: en-US,en;q=0.9",
         "--add-header", "Sec-Fetch-Mode: navigate",
-        "--concurrent-fragments", "10"
+        "--concurrent-fragments", "20",
+        "--buffer-size", "1M"
     ]
     cmd.append(url)
     
@@ -1214,6 +1292,104 @@ async def yt_link_handler(client, message: Message):
         if thumb_name and os.path.exists(thumb_name):
             os.remove(thumb_name)
 
+
+@app.on_message(filters.command(["fb", "ig", "tik"]))
+async def social_dl_handler(client: Client, message: Message):
+    user_id = message.from_user.id
+    if ADMIN_IDS and user_id not in ADMIN_IDS:
+        await message.reply_text("❌ **Access Denied!**")
+        return
+
+    cmd_used = message.command[0]
+    site_map = {"fb": "Facebook", "ig": "Instagram", "tik": "TikTok"}
+    site_name = site_map.get(cmd_used, "Social")
+
+    parts = message.text.split()
+    url = None
+    if len(parts) >= 2:
+        url = parts[1]
+    elif message.reply_to_message and message.reply_to_message.text:
+        url = message.reply_to_message.text.strip()
+        
+    if not url:
+        await message.reply_text(f"<emoji id=5274099962655816924>❗</emoji> Please provide a {site_name} link.\nUsage: /{cmd_used} <URL>")
+        return
+
+    status_msg = await message.reply_text(f"<emoji id=5231012545799666522>🔍</emoji> <b>Processing {site_name} video...</b>", parse_mode=ParseMode.HTML)
+    filename = f"{cmd_used}_video_{user_id}_{int(time.time())}.mp4"
+    thumb_name = None
+    
+    try:
+        # Fetch metadata
+        metadata_cmd = [
+            "yt-dlp", "--dump-json", "--no-check-certificate",
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            url
+        ]
+        
+        process_meta = await asyncio.create_subprocess_exec(
+            *metadata_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        stdout_meta, _ = await process_meta.communicate()
+        
+        title = f"{site_name} Video"
+        if process_meta.returncode == 0:
+            meta = json.loads(stdout_meta.decode())
+            title = meta.get("title", f"{site_name} Video")
+            thumbnail_url = meta.get("thumbnail")
+            if thumbnail_url:
+                thumb_name = f"{cmd_used}_thumb_{int(time.time())}.jpg"
+                async with httpx.AsyncClient(timeout=20) as dl:
+                    try:
+                        r = await dl.get(thumbnail_url)
+                        if r.status_code == 200:
+                            with open(thumb_name, "wb") as f: f.write(r.content)
+                        else: thumb_name = None
+                    except: thumb_name = None
+
+        # Download command
+        cmd = [
+            "yt-dlp",
+            "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "-o", filename,
+            "--no-playlist",
+            "--merge-output-format", "mp4",
+            "--no-check-certificate",
+            "--geo-bypass",
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "--concurrent-fragments", "10",
+            url
+        ]
+        
+        await status_msg.edit_text(f"<emoji id=5429381339851796035>✅</emoji> <b>{site_name} video found! Downloading...</b>", parse_mode=ParseMode.HTML)
+        
+        returncode, stderr = await download_with_progress(cmd, message, status_msg)
+        
+        if returncode != 0 or not os.path.exists(filename):
+            error = stderr.decode(errors="ignore")[:200] if stderr else "Download failed."
+            await status_msg.edit_text(f"<emoji id=5274099962655816924>❌</emoji> <b>Failed!</b>\n\n`{error}`")
+            return
+
+        await status_msg.edit_text("<emoji id=5449683594425410231>📤</emoji> <b>Uploading...</b>", parse_mode=ParseMode.HTML)
+        
+        width, height, duration = await get_video_metadata(filename)
+        user_name = message.from_user.first_name or "User"
+        caption = f"🎬 <b>Title:</b> <code>{title}</code>\n👤 <b>By:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
+
+        start_upload = time.time()
+        await send_video_with_fallback(
+            client=client, chat_id=message.chat.id, filepath=filename,
+            thumb=thumb_name, caption=caption, duration=duration,
+            width=width, height=height, reply_to_id=message.id,
+            progress=upload_progress, progress_args=(client, status_msg, start_upload)
+        )
+        await status_msg.delete()
+
+    except Exception as e:
+        await status_msg.edit_text(f"⚠️ Error: `{e}`")
+    finally:
+        if os.path.exists(filename): os.remove(filename)
+        if thumb_name and os.path.exists(thumb_name): os.remove(thumb_name)
 
 @app.on_message(filters.command("id"))
 async def get_emoji_id(client, message: Message):
@@ -1384,7 +1560,7 @@ async def rmd_json_handler(client: Client, message: Message):
                 is_youtube = any(domain in url for domain in ["youtube.com", "youtu.be", "m.youtube.com", "y2u.be"])
                 if is_youtube:
                     # Small sleep to avoid rate limits
-                    await asyncio.sleep(4)
+                    await asyncio.sleep(2)
                     cmd = [
                         "yt-dlp",
                         "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best",
@@ -1393,13 +1569,13 @@ async def rmd_json_handler(client: Client, message: Message):
                         "--merge-output-format", "mp4",
                         "--no-check-certificate",
                         "--geo-bypass",
-                        "--force-ipv4",
                         "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                        "--extractor-args", "youtube:player_client=android;player_skip=web,mweb",
+                        "--extractor-args", "youtube:player_client=android,ios",
                         "--add-header", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
                         "--add-header", "Accept-Language: en-US,en;q=0.9",
                         "--add-header", "Sec-Fetch-Mode: navigate",
-                        "--concurrent-fragments", "10"
+                        "--concurrent-fragments", "20",
+                        "--buffer-size", "1M"
                     ]
                 else:
                     cmd = [
@@ -1413,7 +1589,8 @@ async def rmd_json_handler(client: Client, message: Message):
                         "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                         "--add-header", "Origin: https://iframe.mediadelivery.net",
                         "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL",
-                        "--concurrent-fragments", "10"
+                        "--concurrent-fragments", "20",
+                        "--buffer-size", "1M"
                     ]
                 
                 cmd.append(url)
@@ -1428,10 +1605,9 @@ async def rmd_json_handler(client: Client, message: Message):
                 returncode, stderr = await download_with_progress(cmd, message, status_msg)
                 
                 if returncode != 0 or not os.path.exists(filename):
-                    error_log = stderr.decode(errors="ignore")[:100] if stderr else "No error info"
                     await client.send_message(
                         message.chat.id, 
-                        f"❌ <b>Failed to download:</b> <code>{title}</code>\n\n<b>Error:</b> <i>{error_log}...</i>",
+                        f"❌ <b>Failed to download:</b> <code>{title}</code>",
                         reply_to_message_id=message.id,
                         parse_mode=ParseMode.HTML
                     )
@@ -1579,7 +1755,7 @@ async def rmall_handler(client: Client, message: Message):
                 is_youtube = any(domain in url for domain in ["youtube.com", "youtu.be", "m.youtube.com", "y2u.be"])
                 if is_youtube:
                     # Small sleep to avoid rate limits
-                    await asyncio.sleep(4)
+                    await asyncio.sleep(2)
                     cmd = [
                         "yt-dlp",
                         "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best",
@@ -1588,13 +1764,13 @@ async def rmall_handler(client: Client, message: Message):
                         "--merge-output-format", "mp4",
                         "--no-check-certificate",
                         "--geo-bypass",
-                        "--force-ipv4",
                         "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                        "--extractor-args", "youtube:player_client=android;player_skip=web,mweb",
+                        "--extractor-args", "youtube:player_client=android,ios",
                         "--add-header", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
                         "--add-header", "Accept-Language: en-US,en;q=0.9",
                         "--add-header", "Sec-Fetch-Mode: navigate",
-                        "--concurrent-fragments", "10"
+                        "--concurrent-fragments", "20",
+                        "--buffer-size", "1M"
                     ]
                 else:
                     cmd = [
@@ -1610,7 +1786,8 @@ async def rmall_handler(client: Client, message: Message):
                         "--add-header", "Origin: https://iframe.mediadelivery.net",
                         "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL",
                         "--add-header", "Accept-Language: en-US,en;q=0.9",
-                        "--concurrent-fragments", "10"
+                        "--concurrent-fragments", "20",
+                        "--buffer-size", "1M"
                     ]
                 
                 cmd.append(url)
