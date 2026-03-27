@@ -1344,7 +1344,7 @@ async def rmd_json_handler(client: Client, message: Message):
         referer = "https://iframe.mediadelivery.net"
         
         for index, video in enumerate(videos, 1):
-            url = video.get("videoURL") or video.get("url")
+            url = video.get("videoURL") or video.get("videoYoutubeURL") or video.get("url")
             title = video.get("videoTitle") or video.get("title", f"Video {index}")
             thumbnail_url = video.get("bunnyThumbnailURL") or video.get("thumbnail")
             
@@ -1549,7 +1549,7 @@ async def rmall_handler(client: Client, message: Message):
         referer = "https://iframe.mediadelivery.net"
         
         for index, video in enumerate(all_videos, 1):
-            url = video.get("original_url") or video.get("stream_url") or video.get("url")
+            url = video.get("original_url") or video.get("videoYoutubeURL") or video.get("stream_url") or video.get("url")
             title = video.get("title", f"Video {index}")
             subject_name = video.get("subject_name_ext")
             chapter_name = video.get("chapter_name_ext")
