@@ -1148,7 +1148,6 @@ async def yt_link_handler(client, message: Message):
     except Exception as e:
         print(f"Metadata extraction error: {e}")
 
-    # Construct yt-dlp command with max bypasses
     cmd = [
         "yt-dlp",
         "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best",
@@ -1157,6 +1156,7 @@ async def yt_link_handler(client, message: Message):
         "--merge-output-format", "mp4",
         "--no-check-certificate",
         "--geo-bypass",
+        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "--extractor-args", "youtube:player_client=android,web;player_skip=web,mweb",
         "--add-header", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "--add-header", "Accept-Language: en-US,en;q=0.9",
@@ -1378,8 +1378,10 @@ async def rmd_json_handler(client: Client, message: Message):
                             thumb_name = None
 
                 # Construct yt-dlp command
-                is_youtube = any(domain in url for domain in ["youtube.com", "youtu.be", "m.youtube.com"])
+                is_youtube = any(domain in url for domain in ["youtube.com", "youtu.be", "m.youtube.com", "y2u.be"])
                 if is_youtube:
+                    # Small sleep to avoid rate limits
+                    await asyncio.sleep(2)
                     cmd = [
                         "yt-dlp",
                         "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best",
@@ -1388,6 +1390,7 @@ async def rmd_json_handler(client: Client, message: Message):
                         "--merge-output-format", "mp4",
                         "--no-check-certificate",
                         "--geo-bypass",
+                        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                         "--extractor-args", "youtube:player_client=android,web;player_skip=web,mweb",
                         "--add-header", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
                         "--add-header", "Accept-Language: en-US,en;q=0.9",
@@ -1568,8 +1571,10 @@ async def rmall_handler(client: Client, message: Message):
             thumb_name = None # In this structure we don't usually have thumbs easily
             
             try:
-                is_youtube = any(domain in url for domain in ["youtube.com", "youtu.be", "m.youtube.com"])
+                is_youtube = any(domain in url for domain in ["youtube.com", "youtu.be", "m.youtube.com", "y2u.be"])
                 if is_youtube:
+                    # Small sleep to avoid rate limits
+                    await asyncio.sleep(2)
                     cmd = [
                         "yt-dlp",
                         "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best",
@@ -1578,6 +1583,7 @@ async def rmall_handler(client: Client, message: Message):
                         "--merge-output-format", "mp4",
                         "--no-check-certificate",
                         "--geo-bypass",
+                        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                         "--extractor-args", "youtube:player_client=android,web;player_skip=web,mweb",
                         "--add-header", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
                         "--add-header", "Accept-Language: en-US,en;q=0.9",
