@@ -26,7 +26,7 @@ ADMIN_IDS = [int(i.strip()) for i in os.environ.get("ADMIN_IDS", "").split(",") 
 
 
 
-app = Client("toydownbot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("toydownbot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, max_concurrent_transmissions=1)
 flask_app = Flask(__name__)
 # =================== Flask ===================
 @flask_app.route("/")
@@ -1080,19 +1080,19 @@ async def yt_link_handler(client, message: Message):
         url = message.reply_to_message.text.strip()
         
     if not url:
-        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please provide a YouTube URL.\nUsage: /yt <URL>", parse_mode=ParseMode.HTML)
+        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> বস, দয়া করে একটি YouTube লিংক দিন।\nব্যবহার: /yt <URL>", parse_mode=ParseMode.HTML)
         return
 
     # URL Validation
-    allowed_domains = ["youtube.com", "youtu.be", "m.youtube.com"]
+    allowed_domains = ["youtube.com", "youtu.be", "m.youtube.com", "y2u.be"]
     if not any(domain in url for domain in allowed_domains):
         await message.reply_text(
-            "<emoji id=5274099962655816924>❌</emoji> <b>Invalid URL!</b>\n\nOnly YouTube URLs are allowed for this command.",
+            "<emoji id=5274099962655816924>❌</emoji> <b>ভুল লিংক!</b>\n\nএটি কোনো সঠিক YouTube লিংক নয়, বস!",
             parse_mode=ParseMode.HTML
         )
         return
 
-    status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Processing YouTube video...", parse_mode=ParseMode.HTML)
+    status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> <b>YouTube ভিডিও প্রসেস করা হচ্ছে... দয়া করে অপেক্ষা করুন!</b>", parse_mode=ParseMode.HTML)
 
     filename = f"yt_video_{user_id}_{int(time.time())}.mp4"
     thumb_name = None
@@ -1151,7 +1151,7 @@ async def yt_link_handler(client, message: Message):
     # Construct yt-dlp command with max bypasses
     cmd = [
         "yt-dlp",
-        "-f", "best[height<=720]/best",
+        "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best",
         "-o", filename,
         "--no-playlist",
         "--merge-output-format", "mp4",
@@ -1165,7 +1165,7 @@ async def yt_link_handler(client, message: Message):
     ]
     cmd.append(url)
     
-    await status_msg.edit_text("<emoji id=5429381339851796035>✅</emoji> Found! Downloading to server...", parse_mode=ParseMode.HTML)
+    await status_msg.edit_text("<emoji id=5429381339851796035>✅</emoji> <b>ভিডিও পাওয়া গেছে! ডাউনলোড শুরু হচ্ছে...</b>", parse_mode=ParseMode.HTML)
     
     try:
         returncode, stderr = await download_with_progress(cmd, message, status_msg)
@@ -1173,13 +1173,13 @@ async def yt_link_handler(client, message: Message):
         if returncode != 0 or not os.path.exists(filename):
             error_details = stderr.decode(errors="ignore")[:200] if stderr else "No error details."
             await status_msg.edit_text(
-                f"<emoji id=5274099962655816924>❌</emoji> <b>Download failed!</b>\n\n"
+                f"<emoji id=5274099962655816924>❌</emoji> <b>ডাউনলোড ব্যর্থ হয়েছে! বস!</b>\n\n"
                 f"<b>Error:</b>\n<code>{error_details}</code>", 
                 parse_mode=ParseMode.HTML
             )
             return
 
-        await status_msg.edit_text("<emoji id=5449683594425410231>📤</emoji> Uploading to Telegram...", parse_mode=ParseMode.HTML)
+        await status_msg.edit_text("<emoji id=5449683594425410231>📤</emoji> <b>Telegram-এ আপলোড করা হচ্ছে...</b>", parse_mode=ParseMode.HTML)
         
         width, height, duration = await get_video_metadata(filename)
         user_name = message.from_user.first_name or message.from_user.username or "User"
@@ -1204,7 +1204,7 @@ async def yt_link_handler(client, message: Message):
         )
         await status_msg.delete()
     except Exception as e:
-        await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> An error occurred.\n\nError: `{e}`", parse_mode=ParseMode.HTML)
+        await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> একটি সমস্যা হয়েছে, বস।\n\nError: `{e}`", parse_mode=ParseMode.HTML)
     finally:
         if os.path.exists(filename):
             os.remove(filename)
