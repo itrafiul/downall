@@ -62,6 +62,10 @@ user_active_downloads = {} # {id: bool}
 user_download_counts = {} # {id: {'count': int, 'cooldown_until': datetime}}
 queue_waitlist = [] # List of message objects or IDs just to track total waiters
 
+# Cancellation tracking
+active_downloads = {} # {status_msg_id: subprocess.Process}
+task_cancel_flags = {} # {original_msg_id: bool}
+
 app = Client("toydownbot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, max_concurrent_transmissions=1)
 flask_app = Flask(__name__)
 # =================== Flask ===================
@@ -409,54 +413,62 @@ async def download_with_progress(cmd, message, status_msg):
         stderr=asyncio.subprocess.PIPE
     )
     
-    last_update_time = 0
-    buffer = ""
+    # Register for cancellation
+    active_downloads[status_msg.id] = process
     
-    # Read stdout in chunks to avoid LimitOverrunError (Separator not found)
-    while True:
-        chunk = await process.stdout.read(4096)
-        if not chunk:
-            break
-            
-        buffer += chunk.decode(errors="ignore")
+    try:
+        last_update_time = 0
+        buffer = ""
         
-        # yt-dlp uses \r for progress updates on the same line
-        while "\n" in buffer or "\r" in buffer:
-            n_pos = buffer.find("\n")
-            r_pos = buffer.find("\r")
+        # Read stdout in chunks to avoid LimitOverrunError (Separator not found)
+        while True:
+            chunk = await process.stdout.read(4096)
+            if not chunk:
+                break
+                
+            buffer += chunk.decode(errors="ignore")
             
-            if n_pos != -1 and r_pos != -1:
-                pos = min(n_pos, r_pos)
-            else:
-                pos = max(n_pos, r_pos)
+            # yt-dlp uses \r for progress updates on the same line
+            while "\n" in buffer or "\r" in buffer:
+                n_pos = buffer.find("\n")
+                r_pos = buffer.find("\r")
                 
-            line = buffer[:pos]
-            buffer = buffer[pos+1:]
-                
-            line = line.strip()
-            if not line:
-                continue
-                
-            progress = parse_yt_dlp_progress(line)
-            if progress and time.time() - last_update_time > 4:
-                percent = progress["percent"]
-                bar = progress_bar(percent)
-                
-                size_text = f"📶 <b>Size:</b> {progress['size']}\n" if progress['size'] != "Unknown" else ""
-                
-                status_text = (
-                    f"<b>📥 Downloading...</b>\n\n"
-                    f"{bar}\n\n"
-                    f"🚧 <b>Progress:</b> {percent:.1f}%\n"
-                    f"⚡️ <b>Speed:</b> {progress['speed']}\n"
-                    f"⏳ <b>ETA:</b> {progress['eta']}\n"
-                    f"{size_text}"
-                )
-                try:
-                    await status_msg.edit_text(status_text, parse_mode=ParseMode.HTML)
-                    last_update_time = time.time()
-                except Exception:
-                    pass
+                if n_pos != -1 and r_pos != -1:
+                    pos = min(n_pos, r_pos)
+                else:
+                    pos = max(n_pos, r_pos)
+                    
+                line = buffer[:pos]
+                buffer = buffer[pos+1:]
+                    
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                progress = parse_yt_dlp_progress(line)
+                if progress and time.time() - last_update_time > 4:
+                    percent = progress["percent"]
+                    bar = progress_bar(percent)
+                    
+                    size_text = f"📶 <b>Size:</b> {progress['size']}\n" if progress['size'] != "Unknown" else ""
+                    
+                    status_text = (
+                        f"<b>📥 Downloading...</b>\n\n"
+                        f"{bar}\n\n"
+                        f"🚧 <b>Progress:</b> {percent:.1f}%\n"
+                        f"⚡️ <b>Speed:</b> {progress['speed']}\n"
+                        f"⏳ <b>ETA:</b> {progress['eta']}\n"
+                        f"{size_text}"
+                    )
+                    try:
+                        await status_msg.edit_text(status_text, parse_mode=ParseMode.HTML)
+                        last_update_time = time.time()
+                    except Exception:
+                        pass
+    finally:
+        # Cleanup
+        if status_msg.id in active_downloads:
+            del active_downloads[status_msg.id]
 
     await process.wait()
     return process.returncode, await process.stderr.read()
@@ -1736,9 +1748,16 @@ async def rmd_json_handler(client: Client, message: Message):
         total = len(videos)
         await status_msg.edit_text(f"<emoji id=5429381339851796035>✅</emoji> Found {total} videos. Starting sequential processing...", parse_mode=ParseMode.HTML)
         
+        # Register task for cancellation
+        task_cancel_flags[message.id] = False
+        
         referer = "https://iframe.mediadelivery.net"
         
         for index, video in enumerate(videos, 1):
+            # Check if task was cancelled
+            if task_cancel_flags.get(message.id):
+                await status_msg.edit_text("<emoji id=5274099962655816924>❌</emoji> <b>Task Cancelled!</b> Remaining videos skipped.", parse_mode=ParseMode.HTML)
+                break
             url = video.get("videoURL") or video.get("videoYoutubeURL") or video.get("url")
             title = video.get("videoTitle") or video.get("title", f"Video {index}")
             thumbnail_url = video.get("bunnyThumbnailURL") or video.get("thumbnail")
@@ -1902,6 +1921,8 @@ async def rmd_json_handler(client: Client, message: Message):
     except Exception as e:
         await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> Error reading JSON: `{e}`", parse_mode=ParseMode.HTML)
     finally:
+        if message.id in task_cancel_flags:
+            del task_cancel_flags[message.id]
         if os.path.exists(json_path):
             os.remove(json_path)
 
@@ -2068,9 +2089,16 @@ async def rmall_handler(client: Client, message: Message):
         total = len(all_videos)
         await status_msg.edit_text(f"✅ Found {total} videos across all subjects. Starting processing...")
         
+        # Register task for cancellation
+        task_cancel_flags[message.id] = False
+        
         referer = "https://iframe.mediadelivery.net"
         
         for index, video in enumerate(all_videos, 1):
+            # Check if task was cancelled
+            if task_cancel_flags.get(message.id):
+                await status_msg.edit_text("❌ <b>Task Cancelled!</b> Remaining videos skipped.")
+                break
             url = video.get("original_url") or video.get("videoYoutubeURL") or video.get("stream_url") or video.get("url")
             title = video.get("title", f"Video {index}")
             subject_name = video.get("subject_name_ext")
@@ -2182,7 +2210,42 @@ async def rmall_handler(client: Client, message: Message):
     except Exception as e:
         await status_msg.edit_text(f"⚠️ Error reading JSON: `{e}`")
     finally:
+        if message.id in task_cancel_flags:
+            del task_cancel_flags[message.id]
         if os.path.exists(json_path): os.remove(json_path)
+
+@app.on_message(filters.command("cancel") & filters.reply)
+async def cancel_handler(client: Client, message: Message):
+    if not is_admin(message.from_user.id):
+        await message.reply_text("❌ <b>Access Denied!</b> Only admins can cancel downloads.", parse_mode=ParseMode.HTML)
+        return
+
+    replied_msg = message.reply_to_message
+    replied_msg_id = replied_msg.id
+    
+    found = False
+    
+    # 1. Check if it's an active process (status message)
+    if replied_msg_id in active_downloads:
+        process = active_downloads[replied_msg_id]
+        try:
+            process.kill()
+            found = True
+        except: pass
+        
+    # 2. Check if it's a multi-video task (original command message)
+    if replied_msg_id in task_cancel_flags:
+        task_cancel_flags[replied_msg_id] = True
+        found = True
+        
+    # 3. Handle cases where they reply to the status message of a multi-video task
+    # We don't easily know the original_msg_id from the status_msg_id unless we track it
+    # But often the status_msg is also in active_downloads, so the current video will stop.
+    
+    if found:
+        await message.reply_text("✅ <b>Cancellation Signal Sent!</b>\n\nThe current process has been terminated.", parse_mode=ParseMode.HTML)
+    else:
+        await message.reply_text("⚠️ <b>No active process found</b> for this message.\n\nMake sure you are replying to an active progress bar or the original command message.", parse_mode=ParseMode.HTML)
 
 # =================== Main ===================
 if __name__ == "__main__":
