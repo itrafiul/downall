@@ -1705,8 +1705,8 @@ async def rmd_json_handler(client: Client, message: Message):
     async with dl_queue.acquire_global(user_id, message):
         # Check if replied to a document
         if not message.reply_to_message or not message.reply_to_message.document:
-        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please reply to a JSON file with /rmd", parse_mode=ParseMode.HTML)
-        return
+            await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please reply to a JSON file with /rmd", parse_mode=ParseMode.HTML)
+            return
 
     if not message.reply_to_message.document.file_name.endswith(".json"):
         await message.reply_text("<emoji id=5274099962655816924>❌</emoji> Only JSON files are supported.", parse_mode=ParseMode.HTML)
@@ -2027,8 +2027,8 @@ async def rmall_handler(client: Client, message: Message):
 
     async with dl_queue.acquire_global(user_id, message):
         if not message.reply_to_message or not message.reply_to_message.document:
-        await message.reply_text("❗ Please reply to the `WEBSITE_ALL_DATA_FINAL.json` file with /rmall")
-        return
+            await message.reply_text("❗ Please reply to the `WEBSITE_ALL_DATA_FINAL.json` file with /rmall")
+            return
 
     status_msg = await message.reply_text("📥 Processing total website data...")
     json_path = await client.download_media(message.reply_to_message)
