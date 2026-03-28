@@ -94,6 +94,9 @@ class DownloadQueue:
 
     async def can_start(self, user_id, message):
         """Check if user is allowed to start based on per-user rules."""
+        if is_admin(user_id):
+            return True # Admins skip all local limits
+
         now = datetime.now()
         
         # 1. One at a time per user
@@ -138,6 +141,11 @@ class DownloadQueue:
     def release(self, user_id):
         """Handle end of download tracking."""
         self.user_active[user_id] = False
+        
+        # Admins don't get cooldowns
+        if is_admin(user_id):
+            return
+
         stat = self.user_stats.get(user_id, {'count': 0, 'cooldown_until': None})
         stat['count'] += 1
         
