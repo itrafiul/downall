@@ -145,7 +145,9 @@ class DownloadQueue:
     def release(self, user_id):
         """Handle end of download tracking."""
         self.user_active[user_id] = False
-        
+
+    def on_success(self, user_id):
+        """Record a successful download and handle cooldown."""
         # Admins don't get cooldowns
         if is_admin(user_id):
             return
@@ -663,6 +665,7 @@ async def afs_link_handler(client, message: Message):
             progress=upload_progress,
             progress_args=(client, status_msg, start_upload)
         )
+        dl_queue.on_success(user_id)
         await status_msg.delete()
 
     except Exception as e:
@@ -779,6 +782,7 @@ async def ba_link_handler(client, message: Message):
             width=width, height=height, reply_to_id=message.id,
             progress=upload_progress, progress_args=(client, status_msg, start_upload)
         )
+        dl_queue.on_success(user_id)
         await status_msg.delete()
 
     except Exception as e:
@@ -922,6 +926,7 @@ async def rm_link_handler(client, message: Message):
             progress=upload_progress,
             progress_args=(client, status_msg, start_upload)
         )
+        dl_queue.on_success(user_id)
         await status_msg.delete()
 
     except Exception:
@@ -1067,6 +1072,7 @@ async def shikho_link_handler(client, message: Message):
             progress=upload_progress,
             progress_args=(client, status_msg, start_upload)
         )
+        dl_queue.on_success(user_id)
         await status_msg.delete()
 
     except Exception:
@@ -1201,6 +1207,7 @@ async def hk_link_handler(client, message: Message):
             progress=upload_progress,
             progress_args=(client, status_msg, start_upload)
         )
+        dl_queue.on_success(user_id)
         await status_msg.delete()
 
     except Exception as e:
@@ -1331,6 +1338,7 @@ async def udvash_link_handler(client, message: Message):
             progress=upload_progress,
             progress_args=(client, status_msg, start_upload)
         )
+        dl_queue.on_success(user_id)
         await status_msg.delete()
 
     except Exception:
@@ -1488,6 +1496,7 @@ async def yt_link_handler(client, message: Message):
             progress=upload_progress,
             progress_args=(client, status_msg, start_upload)
         )
+        dl_queue.on_success(user_id)
         await status_msg.delete()
     except Exception as e:
         await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> An error occurred, boss.\n\nError: `{e}`", parse_mode=ParseMode.HTML)
@@ -1596,6 +1605,7 @@ async def social_dl_handler(client: Client, message: Message):
             width=width, height=height, reply_to_id=message.id,
             progress=upload_progress, progress_args=(client, status_msg, start_upload)
         )
+        dl_queue.on_success(user_id)
         await status_msg.delete()
 
     except Exception as e:
@@ -1902,6 +1912,7 @@ async def rmd_json_handler(client: Client, message: Message):
                     progress=upload_progress,
                     progress_args=(client, status_msg, start_upload)
                 )
+                dl_queue.on_success(user_id)
                 
             except Exception as e:
                 await client.send_message(
@@ -2199,6 +2210,7 @@ async def rmall_handler(client: Client, message: Message):
                     progress=upload_progress,
                     progress_args=(client, status_msg, start_upload)
                 )
+                dl_queue.on_success(user_id)
                 
             except Exception as e:
                 await client.send_message(message.chat.id, f"⚠️ Error video {index}: `{e}`")
