@@ -2,6 +2,8 @@ import os
 import time
 import math
 import shutil
+import random
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,18 +15,52 @@ import m3u8
 from urllib.parse import urljoin
 from flask import Flask
 from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.enums import MessageEntityType, ParseMode
+from contextlib import asynccontextmanager
 
 # =================== Configuration ===================
-# Get these from https://my.telegram.org
-# Get these from https://my.telegram.org
 API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-ADMIN_IDS = [int(i.strip()) for i in os.environ.get("ADMIN_IDS", "").split(",") if i.strip()]
 
+ADMINS_FILE = "admins.json"
+ALLOWED_CHAT_ID = -1003648612088
 
+def load_admins():
+    """Load admin IDs from file and environment."""
+    env_admins = [int(i.strip()) for i in os.environ.get("ADMIN_IDS", "").split(",") if i.strip()]
+    dynamic_admins = []
+    if os.path.exists(ADMINS_FILE):
+        try:
+            with open(ADMINS_FILE, "r") as f:
+                dynamic_admins = json.load(f)
+        except:
+            pass
+    return env_admins, dynamic_admins
+
+def save_admins(dynamic_admins):
+    """Save dynamic admin IDs to file."""
+    try:
+        with open(ADMINS_FILE, "w") as f:
+            json.dump(dynamic_admins, f)
+    except Exception as e:
+        print(f"Error saving admins: {e}")
+
+SUPER_ADMINS, DYNAMIC_ADMINS = load_admins()
+
+def is_admin(user_id):
+    """Check if a user is an admin or super admin."""
+    return user_id in SUPER_ADMINS or user_id in DYNAMIC_ADMINS
+
+def is_super_admin(user_id):
+    """Check if a user is a fixed super admin from .env."""
+    return user_id in SUPER_ADMINS
+# =================== Global State ===================
+global_semaphore = asyncio.Semaphore(5)
+user_active_downloads = {} # {id: bool}
+user_download_counts = {} # {id: {'count': int, 'cooldown_until': datetime}}
+queue_waitlist = [] # List of message objects or IDs just to track total waiters
 
 app = Client("toydownbot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, max_concurrent_transmissions=1)
 flask_app = Flask(__name__)
@@ -49,6 +85,72 @@ def run_flask():
         print(f"⚠️ Flask could not start on port {port}: {e}")
 
 # =================== Progress Tracking ===================
+class DownloadQueue:
+    def __init__(self, limit):
+        self.semaphore = asyncio.Semaphore(limit)
+        self.waitlist = []
+        self.user_active = {}
+        self.user_stats = {} # {id: {'count': 0, 'cooldown_until': datetime}}
+
+    async def can_start(self, user_id, message):
+        """Check if user is allowed to start based on per-user rules."""
+        now = datetime.now()
+        
+        # 1. One at a time per user
+        if self.user_active.get(user_id):
+            await message.reply_text("❌ <b>Access Denied!</b>\n\nYou already have an active download. Please wait until it's finished.", parse_mode=ParseMode.HTML)
+            return False
+
+        # 2. Rate limiting (2 downloads -> 10-14m wait)
+        stat = self.user_stats.get(user_id, {'count': 0, 'cooldown_until': None})
+        if stat['cooldown_until'] and now < stat['cooldown_until']:
+            rem = stat['cooldown_until'] - now
+            mins, secs = int(rem.total_seconds() // 60), int(rem.total_seconds() % 60)
+            await message.reply_text(f"⏳ <b>Cooldown Active!</b>\n\nYou've reached your 2-video limit. Please wait <b>{mins}m {secs}s</b> for your next window.", parse_mode=ParseMode.HTML)
+            return False
+            
+        return True
+
+    @asynccontextmanager
+    async def acquire_global(self, user_id, message):
+        """Acquire a slot in the global queue."""
+        if self.semaphore.locked():
+            self.waitlist.append(user_id)
+            serial = len(self.waitlist)
+            status_msg = await message.reply_text(f"📡 <b>Server Busy! (Queue: #{serial})</b>\n\nGlobal limit of 5 concurrent downloads is reached. Please wait for your turn...", parse_mode=ParseMode.HTML)
+            
+            async with self.semaphore:
+                if user_id in self.waitlist: self.waitlist.remove(user_id)
+                await status_msg.edit_text("✅ <b>It's your turn!</b> Initializing download...", parse_mode=ParseMode.HTML)
+                self.user_active[user_id] = True
+                try:
+                    yield
+                finally:
+                    self.release(user_id)
+        else:
+            async with self.semaphore:
+                self.user_active[user_id] = True
+                try:
+                    yield
+                finally:
+                    self.release(user_id)
+
+    def release(self, user_id):
+        """Handle end of download tracking."""
+        self.user_active[user_id] = False
+        stat = self.user_stats.get(user_id, {'count': 0, 'cooldown_until': None})
+        stat['count'] += 1
+        
+        if stat['count'] >= 2:
+            stat['count'] = 0
+            wait_time = random.randint(10, 14)
+            stat['cooldown_until'] = datetime.now() + timedelta(minutes=wait_time)
+            
+        self.user_stats[user_id] = stat
+
+# Instance
+dl_queue = DownloadQueue(5)
+
 def progress_bar(percent):
     done = int(percent / 5)
     return "▓" * done + "░" * (20 - done)
@@ -371,10 +473,14 @@ async def get_bunny_m3u8(url):
 # =================== Handlers ===================
 @app.on_message(filters.command("start"))
 async def start_handler(client, message: Message):
-    user_id = message.from_user.id
-    if ADMIN_IDS and user_id not in ADMIN_IDS:
-        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
+    if message.chat.id != ALLOWED_CHAT_ID:
+        await message.reply_text(
+            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
+        )
         return
+    user_id = message.from_user.id
     bot_info = await client.get_me()
 
     bot_name = bot_info.first_name
@@ -403,14 +509,20 @@ async def start_handler(client, message: Message):
 
 @app.on_message(filters.command("afs"))
 async def afs_link_handler(client, message: Message):
-    user_id = message.from_user.id
-    if ADMIN_IDS and user_id not in ADMIN_IDS:
-        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
+    if message.chat.id != ALLOWED_CHAT_ID:
+        await message.reply_text(
+            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
+        )
         return
+    user_id = message.from_user.id
+    
+    # Queue Check
+    if not await dl_queue.can_start(user_id, message): return
 
-
-
-    parts = message.text.split()
+    async with dl_queue.acquire_global(user_id, message):
+        parts = message.text.split()
     url = None
     referer = "https://iframe.mediadelivery.net"
     
@@ -542,12 +654,20 @@ async def afs_link_handler(client, message: Message):
 
 @app.on_message(filters.command("ba"))
 async def ba_link_handler(client, message: Message):
-    user_id = message.from_user.id
-    if ADMIN_IDS and user_id not in ADMIN_IDS:
-        await message.reply_text("❌ **Access Denied!**")
+    if message.chat.id != ALLOWED_CHAT_ID:
+        await message.reply_text(
+            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
+        )
         return
+    user_id = message.from_user.id
 
-    parts = message.text.split()
+    # Queue Check
+    if not await dl_queue.can_start(user_id, message): return
+
+    async with dl_queue.acquire_global(user_id, message):
+        parts = message.text.split()
     player_url = None
     
     if len(parts) >= 2: player_url = parts[1]
@@ -648,14 +768,20 @@ async def ba_link_handler(client, message: Message):
 
 @app.on_message(filters.command("rm"))
 async def rm_link_handler(client, message: Message):
-    user_id = message.from_user.id
-    if ADMIN_IDS and user_id not in ADMIN_IDS:
-        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
+    if message.chat.id != ALLOWED_CHAT_ID:
+        await message.reply_text(
+            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
+        )
         return
+    user_id = message.from_user.id
 
+    # Queue Check
+    if not await dl_queue.can_start(user_id, message): return
 
-
-    parts = message.text.split()
+    async with dl_queue.acquire_global(user_id, message):
+        parts = message.text.split()
     url = None
     referer = "https://iframe.mediadelivery.net"
     
@@ -787,14 +913,20 @@ async def rm_link_handler(client, message: Message):
 
 @app.on_message(filters.command("shikho"))
 async def shikho_link_handler(client, message: Message):
-    user_id = message.from_user.id
-    if ADMIN_IDS and user_id not in ADMIN_IDS:
-        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
+    if message.chat.id != ALLOWED_CHAT_ID:
+        await message.reply_text(
+            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
+        )
         return
+    user_id = message.from_user.id
 
+    # Queue Check
+    if not await dl_queue.can_start(user_id, message): return
 
-
-    parts = message.text.split()
+    async with dl_queue.acquire_global(user_id, message):
+        parts = message.text.split()
     url = None
     referer = "https://app.shikho.com/"
     
@@ -925,12 +1057,22 @@ async def shikho_link_handler(client, message: Message):
 
 @app.on_message(filters.command("hk"))
 async def hk_link_handler(client, message: Message):
-    user_id = message.from_user.id
-    if ADMIN_IDS and user_id not in ADMIN_IDS:
-        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
+    if message.chat.id != ALLOWED_CHAT_ID:
+        await message.reply_text(
+            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
+        )
         return
+    user_id = message.from_user.id
 
-    parts = message.text.split()
+    # Queue Check
+
+    # Queue Check
+    if not await dl_queue.can_start(user_id, message): return
+
+    async with dl_queue.acquire_global(user_id, message):
+        parts = message.text.split()
     url = None
     referer = "https://edgecoursebd.com/"
     
@@ -1051,14 +1193,20 @@ async def hk_link_handler(client, message: Message):
 
 @app.on_message(filters.command("udvash"))
 async def udvash_link_handler(client, message: Message):
-    user_id = message.from_user.id
-    if ADMIN_IDS and user_id not in ADMIN_IDS:
-        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
+    if message.chat.id != ALLOWED_CHAT_ID:
+        await message.reply_text(
+            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
+        )
         return
+    user_id = message.from_user.id
 
+    # Queue Check
+    if not await dl_queue.can_start(user_id, message): return
 
-
-    parts = message.text.split()
+    async with dl_queue.acquire_global(user_id, message):
+        parts = message.text.split()
     url = None
     
     if len(parts) >= 2:
@@ -1174,12 +1322,20 @@ async def udvash_link_handler(client, message: Message):
 
 @app.on_message(filters.command("yt"))
 async def yt_link_handler(client, message: Message):
-    user_id = message.from_user.id
-    if ADMIN_IDS and user_id not in ADMIN_IDS:
-        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
+    if message.chat.id != ALLOWED_CHAT_ID:
+        await message.reply_text(
+            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
+        )
         return
+    user_id = message.from_user.id
 
-    parts = message.text.split()
+    # Queue Check
+    if not await dl_queue.can_start(user_id, message): return
+
+    async with dl_queue.acquire_global(user_id, message):
+        parts = message.text.split()
     url = None
     
     if len(parts) >= 2:
@@ -1324,12 +1480,20 @@ async def yt_link_handler(client, message: Message):
 
 @app.on_message(filters.command(["fb", "ig", "tik"]))
 async def social_dl_handler(client: Client, message: Message):
-    user_id = message.from_user.id
-    if ADMIN_IDS and user_id not in ADMIN_IDS:
-        await message.reply_text("❌ **Access Denied!**")
+    if message.chat.id != ALLOWED_CHAT_ID:
+        await message.reply_text(
+            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
+        )
         return
+    user_id = message.from_user.id
 
-    cmd_used = message.command[0]
+    # Queue Check
+    if not await dl_queue.can_start(user_id, message): return
+
+    async with dl_queue.acquire_global(user_id, message):
+        cmd_used = message.command[0]
     site_map = {"fb": "Facebook", "ig": "Instagram", "tik": "TikTok"}
     site_name = site_map.get(cmd_used, "Social")
 
@@ -1422,11 +1586,15 @@ async def social_dl_handler(client: Client, message: Message):
 
 @app.on_message(filters.command("id"))
 async def get_emoji_id(client, message: Message):
+    if message.chat.id != ALLOWED_CHAT_ID:
+        await message.reply_text(
+            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
+        )
+        return
     target = message.reply_to_message if message.reply_to_message else message
     user_id = message.from_user.id
-    if ADMIN_IDS and user_id not in ADMIN_IDS:
-        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
-        return
 
     # Log to console for debugging
 
@@ -1480,9 +1648,9 @@ async def get_emoji_id(client, message: Message):
 
 @app.on_message(filters.document)
 async def cookies_handler(client, message: Message):
-    user_id = message.from_user.id
-    if ADMIN_IDS and user_id not in ADMIN_IDS:
+    if message.chat.id != ALLOWED_CHAT_ID:
         return
+    user_id = message.from_user.id
     
     file_name = message.document.file_name
     if file_name in ["cookies.txt", "cookies.json"]:
@@ -1519,13 +1687,24 @@ async def cookies_handler(client, message: Message):
 
 @app.on_message(filters.command("rmd"))
 async def rmd_json_handler(client: Client, message: Message):
+    if message.chat.id != ALLOWED_CHAT_ID:
+        await message.reply_text(
+            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
+        )
+        return
     user_id = message.from_user.id
-    if ADMIN_IDS and user_id not in ADMIN_IDS:
-        await message.reply_text("❌ **Access Denied!**\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
+    if not is_admin(user_id):
+        await message.reply_text("❌ <b>Access Denied!</b>\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
         return
 
-    # Check if replied to a document
-    if not message.reply_to_message or not message.reply_to_message.document:
+    # Queue Check
+    if not await dl_queue.can_start(user_id, message): return
+
+    async with dl_queue.acquire_global(user_id, message):
+        # Check if replied to a document
+        if not message.reply_to_message or not message.reply_to_message.document:
         await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please reply to a JSON file with /rmd", parse_mode=ParseMode.HTML)
         return
 
@@ -1718,14 +1897,136 @@ async def rmd_json_handler(client: Client, message: Message):
         if os.path.exists(json_path):
             os.remove(json_path)
 
-@app.on_message(filters.command("rmall"))
-async def rmall_handler(client: Client, message: Message):
+# =================== Admin Management ===================
+@app.on_message(filters.command("addadmin"))
+async def add_admin_handler(client, message: Message):
+    if message.chat.id != ALLOWED_CHAT_ID:
+        await message.reply_text(
+            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
+        )
+        return
     user_id = message.from_user.id
-    if ADMIN_IDS and user_id not in ADMIN_IDS:
-        await message.reply_text("❌ **Access Denied!**")
+    if not is_super_admin(user_id):
+        await message.reply_text("❌ <b>Access Denied!</b> Only Super Admins (fixed in .env) can add other admins!", parse_mode=ParseMode.HTML)
         return
 
-    if not message.reply_to_message or not message.reply_to_message.document:
+    target_id = None
+    if message.reply_to_message:
+        target_id = message.reply_to_message.from_user.id
+    else:
+        parts = message.text.split()
+        if len(parts) >= 2:
+            try:
+                target_id = int(parts[1])
+            except:
+                pass
+
+    if not target_id:
+        await message.reply_text("❗ Please reply to a user or provide a User ID.\nUsage: `/addadmin [User ID]`")
+        return
+
+    if is_admin(target_id):
+        await message.reply_text("ℹ️ This user is already an admin.")
+        return
+
+    DYNAMIC_ADMINS.append(target_id)
+    save_admins(DYNAMIC_ADMINS)
+    await message.reply_text(f"✅ User `<code>{target_id}</code>` has been added as a dynamic admin!")
+
+@app.on_message(filters.command("rmadmin"))
+async def remove_admin_handler(client, message: Message):
+    if message.chat.id != ALLOWED_CHAT_ID:
+        await message.reply_text(
+            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
+        )
+        return
+    user_id = message.from_user.id
+    if not is_super_admin(user_id):
+        await message.reply_text("❌ <b>Access Denied!</b> Only Super Admins (fixed in .env) can remove admins!", parse_mode=ParseMode.HTML)
+        return
+
+    target_id = None
+    if message.reply_to_message:
+        target_id = message.reply_to_message.from_user.id
+    else:
+        parts = message.text.split()
+        if len(parts) >= 2:
+            try:
+                target_id = int(parts[1])
+            except:
+                pass
+
+    if not target_id:
+        await message.reply_text("❗ Please reply to a user or provide a User ID.\nUsage: `/rmadmin [User ID]`")
+        return
+
+    # Check if target is a super admin
+    if target_id in SUPER_ADMINS:
+        await message.reply_text("❌ **Access Denied!** This user is a Super Admin (from .env) and cannot be removed!")
+        return
+
+    # Don't allow removing yourself
+    if target_id == user_id:
+        await message.reply_text("❌ You cannot remove yourself from admins!")
+        return
+
+    if target_id not in DYNAMIC_ADMINS:
+        await message.reply_text("ℹ️ This user is not a dynamic admin.")
+        return
+
+    DYNAMIC_ADMINS.remove(target_id)
+    save_admins(DYNAMIC_ADMINS)
+    await message.reply_text(f"✅ User `<code>{target_id}</code>` has been removed from dynamic admins!")
+
+@app.on_message(filters.command("admins"))
+async def list_admins_handler(client, message: Message):
+    if message.chat.id != ALLOWED_CHAT_ID:
+        await message.reply_text(
+            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
+        )
+        return
+    user_id = message.from_user.id
+    if not is_super_admin(user_id):
+        await message.reply_text("❌ Access Denied! Only Super Admins can view the full list.")
+        return
+
+    text = "<b>👮 Current Admins:</b>\n\n"
+    text += f"👑 <b>Super Admins (Fixed):</b>\n"
+    for i, aid in enumerate(SUPER_ADMINS, 1):
+        text += f"  {i}. <code>{aid}</code>\n"
+    
+    if DYNAMIC_ADMINS:
+        text += f"\n👤 <b>Dynamic Admins:</b>\n"
+        for i, aid in enumerate(DYNAMIC_ADMINS, 1):
+            text += f"  {i}. <code>{aid}</code>\n"
+    
+    await message.reply_text(text, parse_mode=ParseMode.HTML)
+
+@app.on_message(filters.command("rmall"))
+async def rmall_handler(client: Client, message: Message):
+    if message.chat.id != ALLOWED_CHAT_ID:
+        await message.reply_text(
+            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
+        )
+        return
+    user_id = message.from_user.id
+    if not is_admin(user_id):
+        await message.reply_text("❌ <b>Access Denied!</b>", parse_mode=ParseMode.HTML)
+        return
+
+    # Queue Check
+    if not await dl_queue.can_start(user_id, message): return
+
+    async with dl_queue.acquire_global(user_id, message):
+        if not message.reply_to_message or not message.reply_to_message.document:
         await message.reply_text("❗ Please reply to the `WEBSITE_ALL_DATA_FINAL.json` file with /rmall")
         return
 
