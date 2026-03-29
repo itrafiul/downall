@@ -620,6 +620,7 @@ async def start_handler(client, message: Message):
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Facebook:</b> <code>/fb [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Instagram:</b> <code>/ig [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>TikTok:</b> <code>/tik [link]</code>\n"
+        f" <emoji id=5206607081334906820>✔️</emoji> <b>RM to YouTube:</b> <code>/rmu [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>YouTube Upload:</b> <code>/up (reply to video)</code>\n\n"
         f"<i>Just send me a link and let the magic happen!</i> <emoji id=5220166546491459639>🔥</emoji>"
     )
@@ -717,7 +718,7 @@ async def afs_link_handler(client, message: Message):
         # Construct yt-dlp command with dedicated referer and user-agent flags
         cmd = [
             "yt-dlp",
-            "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
             "-o", filename,
             "--no-playlist",
             "--merge-output-format", "mp4",
@@ -839,7 +840,7 @@ async def ba_link_handler(client, message: Message):
     try:
         cmd = [
             "yt-dlp",
-            "-f", "best[height<=720]/best",
+            "-f", "best[height<=1080]/best",
             "-o", filename,
             "--no-playlist",
             "--merge-output-format", "mp4",
@@ -978,7 +979,7 @@ async def rm_link_handler(client, message: Message):
         # Construct yt-dlp command with dedicated referer and user-agent flags
         cmd = [
             "yt-dlp",
-            "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
             "-o", filename,
             "--no-playlist",
             "--merge-output-format", "mp4",
@@ -1031,10 +1032,101 @@ async def rm_link_handler(client, message: Message):
 
     except Exception:
         await status_msg.edit_text(f"<emoji id=5274099962655816924>⚠️</emoji> <b>A processing error occurred.</b>", parse_mode=ParseMode.HTML)
-    finally:
-
         if os.path.exists(filename):
             os.remove(filename)
+
+@app.on_message(filters.command("rmu"))
+async def rmu_link_handler(client, message: Message):
+    if not is_admin(message.from_user.id):
+        await message.reply_text(
+            "❌ <b>Admin Only Command!</b>\n\nOnly administrators can use this command.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+    user_id = message.from_user.id
+    
+    # Queue Check
+    if not await dl_queue.can_start(user_id, message): return
+
+    async with dl_queue.acquire_global(user_id, message):
+        parts = message.text.split()
+    url = None
+    referer = "https://iframe.mediadelivery.net"
+    
+    if len(parts) >= 2:
+        url = parts[1]
+    if not url and message.reply_to_message and message.reply_to_message.text:
+        url = message.reply_to_message.text.strip()
+        
+    if not url:
+        await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please provide an RM URL.\nUsage: /rmu <URL>", parse_mode=ParseMode.HTML)
+        return
+
+    # URL Validation
+    allowed_domains = ["iframe.mediadelivery.net"]
+    if not any(domain in url for domain in allowed_domains):
+        await message.reply_text("<emoji id=5274099962655816924>❌</emoji> <b>Invalid URL!</b>", parse_mode=ParseMode.HTML)
+        return
+
+    status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Processing RM video for YouTube...", parse_mode=ParseMode.HTML)
+    filename = f"rmu_video_{user_id}_{int(time.time())}.mp4"
+    title = "RM YouTube Video"
+    
+    try:
+        # Fetch metadata
+        metadata_cmd = ["yt-dlp", "--dump-json", "--referer", referer, "--no-check-certificate", url]
+        process_meta = await asyncio.create_subprocess_exec(*metadata_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout_meta, _ = await process_meta.communicate()
+        if process_meta.returncode == 0:
+            try:
+                metadata = json.loads(stdout_meta.decode())
+                title = metadata.get("title", "RM Video")
+            except: pass
+
+        # Download
+        cmd = [
+            "yt-dlp",
+            "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+            "-o", filename,
+            "--no-playlist",
+            "--merge-output-format", "mp4",
+            "--referer", referer,
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "--no-check-certificate",
+            "--downloader-args", "ffmpeg:-allowed_segment_extensions ALL",
+            "--concurrent-fragments", "10"
+        ]
+        cmd.append(url)
+        
+        await status_msg.edit_text("<emoji id=5429381339851796035>✅</emoji> Found! Downloading for YouTube upload...", parse_mode=ParseMode.HTML)
+        returncode, stderr = await download_with_progress(cmd, message, status_msg)
+        
+        if returncode != 0 or not os.path.exists(filename):
+            await status_msg.edit_text("❌ Download failed.")
+            return
+
+        await status_msg.edit_text("🚀 <b>Uploading to YouTube... (Unlisted)</b>", parse_mode=ParseMode.HTML)
+        
+        description = f"RM Video Uploaded via Telegram Bot by {message.from_user.first_name}"
+        
+        # Run upload in thread
+        yt_link, channel_name = await asyncio.to_thread(upload_to_youtube, filename, title, description)
+        
+        await status_msg.edit_text(
+            f"✅ <b>Successfully Uploaded to YouTube!</b>\n\n"
+            f"🎬 <b>Channel:</b> <code>{channel_name}</code>\n"
+            f"🎬 <b>Title:</b> <code>{title}</code>\n"
+            f"🔗 <b>Link:</b> {yt_link}\n"
+            f"👁 <b>Visibility:</b> Unlisted",
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True
+        )
+        dl_queue.on_success(user_id)
+
+    except Exception as e:
+        await status_msg.edit_text(f"⚠️ Error: `{e}`")
+    finally:
+        if os.path.exists(filename): os.remove(filename)
 
 @app.on_message(filters.command("shikho"))
 async def shikho_link_handler(client, message: Message):
@@ -1124,7 +1216,7 @@ async def shikho_link_handler(client, message: Message):
         # Construct yt-dlp command with 720p quality
         cmd = [
             "yt-dlp",
-            "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
             "-o", filename,
             "--no-playlist",
             "--merge-output-format", "mp4",
@@ -1265,7 +1357,7 @@ async def hk_link_handler(client, message: Message):
         # Construct yt-dlp command
         cmd = [
             "yt-dlp",
-            "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
             "-o", filename,
             "--no-playlist",
             "--merge-output-format", "mp4",
@@ -1398,7 +1490,7 @@ async def udvash_link_handler(client, message: Message):
         # Construct yt-dlp command for direct download
         cmd = [
             "yt-dlp",
-            "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
             "-o", filename,
             "--no-playlist",
             "--merge-output-format", "mp4",
@@ -1543,7 +1635,7 @@ async def yt_link_handler(client, message: Message):
 
     cmd = [
         "yt-dlp",
-        "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best",
+        "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best",
         "-o", filename,
         "--no-playlist",
         "--merge-output-format", "mp4",
@@ -1672,7 +1764,7 @@ async def social_dl_handler(client: Client, message: Message):
         # Download command
         cmd = [
             "yt-dlp",
-            "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
             "-o", filename,
             "--no-playlist",
             "--merge-output-format", "mp4",
@@ -1908,7 +2000,7 @@ async def rmd_json_handler(client: Client, message: Message):
                     await asyncio.sleep(2)
                     cmd = [
                         "yt-dlp",
-                        "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best",
+                        "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best",
                         "-o", filename,
                         "--no-playlist",
                         "--merge-output-format", "mp4",
@@ -1925,7 +2017,7 @@ async def rmd_json_handler(client: Client, message: Message):
                 else:
                     cmd = [
                         "yt-dlp",
-                        "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+                        "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
                         "-o", filename,
                         "--no-playlist",
                         "--merge-output-format", "mp4",
@@ -2235,7 +2327,7 @@ async def rmall_handler(client: Client, message: Message):
                     await asyncio.sleep(2)
                     cmd = [
                         "yt-dlp",
-                        "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best",
+                        "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best",
                         "-o", filename,
                         "--no-playlist",
                         "--merge-output-format", "mp4",
@@ -2252,7 +2344,7 @@ async def rmall_handler(client: Client, message: Message):
                 else:
                     cmd = [
                         "yt-dlp",
-                        "-f", "best[height<=720]/best",
+                        "-f", "best[height<=1080]/best",
                         "-o", filename,
                         "--no-playlist",
                         "--merge-output-format", "mp4",
