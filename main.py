@@ -2295,8 +2295,8 @@ async def up_handler(client, message: Message):
             
         description = f"Uploaded via Telegram Bot by Admin {message.from_user.id}"
         
-        # Run the async upload (which has sync blocks inside)
-        yt_link, channel_name = await upload_to_youtube(file_path, title, description)
+        # Run the synchronous upload in a thread so it doesn't freeze the bot
+        yt_link, channel_name = await asyncio.to_thread(upload_to_youtube, file_path, title, description)
         
         await status_msg.edit_text(
             f"✅ <b>Successfully Uploaded to YouTube!</b>\n\n"
