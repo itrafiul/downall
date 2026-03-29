@@ -7,7 +7,10 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 
 # If modifying these SCOPES, delete the token storage.
-SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
+SCOPES = [
+    'https://www.googleapis.com/auth/youtube.upload',
+    'https://www.googleapis.com/auth/youtube.readonly'
+]
 
 def get_youtube_service():
     creds = None
@@ -56,9 +59,9 @@ def get_youtube_service():
 
     return build('youtube', 'v3', credentials=creds)
 
-async def upload_to_youtube(file_path, title, description, category_id="27", privacy_status="unlisted"):
+def upload_to_youtube(file_path, title, description, category_id="27", privacy_status="unlisted"):
     """
-    Uploads a video to YouTube.
+    Uploads a video to YouTube. (Synchronous)
     category_id "27" is Education.
     """
     youtube = get_youtube_service()
