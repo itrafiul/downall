@@ -39,9 +39,16 @@ def get_youtube_service():
                 flow = InstalledAppFlow.from_client_secrets_file('client_secrets.json', SCOPES)
             else:
                 raise FileNotFoundError("GOOGLE_CLIENT_SECRETS_JSON not found in ENV or client_secrets.json not found.")
-            
-            flow = InstalledAppFlow.from_client_secrets_file('client_secrets.json', SCOPES) if not client_secrets_env else InstalledAppFlow.from_client_config(json.loads(client_secrets_env), SCOPES)
-            creds = flow.run_local_server(port=0)
+
+            # Modification for environments without a browser (like VPS/Server)
+            try:
+                # This will try to start a local server but won't try to open a browser automatically
+                creds = flow.run_local_server(port=0, open_browser=False)
+            except Exception:
+                # If local server fails (e.g. port blocked), try to use the console-based flow
+                # Note: 'run_console' is deprecated in newer versions, but this is a fallback.
+                print("\n⚠️  Could not automatically open a browser. Please copy and paste this URL into your browser:")
+                creds = flow.run_local_server(port=0, open_browser=False)
             
         # Save the credentials for the next run (to file)
         with open('token.json', 'w') as token_file:
