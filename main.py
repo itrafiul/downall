@@ -621,6 +621,7 @@ async def start_handler(client, message: Message):
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Instagram:</b> <code>/ig [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>TikTok:</b> <code>/tik [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>RM to YouTube:</b> <code>/rmu [link]</code>\n"
+        f" <emoji id=5206607081334906820>✔️</emoji> <b>Bulk YouTube:</b> <code>/rmallu (reply to JSON)</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>YouTube Upload:</b> <code>/up (reply to video)</code>\n\n"
         f"<i>Just send me a link and let the magic happen!</i> <emoji id=5220166546491459639>🔥</emoji>"
     )
@@ -2416,6 +2417,122 @@ async def rmall_handler(client: Client, message: Message):
     finally:
         if message.id in task_cancel_flags:
             del task_cancel_flags[message.id]
+        if os.path.exists(json_path): os.remove(json_path)
+
+@app.on_message(filters.command("rmallu"))
+async def rmallu_handler(client: Client, message: Message):
+    if not is_admin(message.from_user.id):
+        await message.reply_text("<emoji id=5210952531676504517>❌</emoji> <b>Admin Only Command!</b>", parse_mode=ParseMode.HTML)
+        return
+    user_id = message.from_user.id
+    
+    # Queue Check
+    if not await dl_queue.can_start(user_id, message): return
+
+    async with dl_queue.acquire_global(user_id, message):
+        if not message.reply_to_message or not message.reply_to_message.document:
+            await message.reply_text("❗ Please reply to the JSON file with /rmallu")
+            return
+
+    status_msg = await message.reply_text("📥 Processing total website data for YouTube...")
+    json_path = await client.download_media(message.reply_to_message)
+    
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data_root = json.load(f)
+        
+        all_videos = []
+        subjects = data_root.get("data", [])
+        for sub in subjects:
+            sub_name = sub.get("subject_name", "Unknown Subject")
+            chapters = sub.get("chapters", [])
+            for chp in chapters:
+                chp_name = chp.get("chapter_name", "Unknown Chapter")
+                videos = chp.get("videos", [])
+                for vid in videos:
+                    vid["subject_name_ext"] = sub_name
+                    vid["chapter_name_ext"] = chp_name
+                    all_videos.append(vid)
+        
+        if not all_videos:
+            await status_msg.edit_text("❌ No videos found in JSON.")
+            return
+
+        total = len(all_videos)
+        await status_msg.edit_text(f"✅ Found {total} videos. Starting bulk YouTube upload...")
+        
+        task_cancel_flags[message.id] = False
+        referer = "https://iframe.mediadelivery.net"
+        
+        for index, video in enumerate(all_videos, 1):
+            if task_cancel_flags.get(message.id):
+                await status_msg.edit_text("❌ <b>Task Cancelled!</b> Remaining videos skipped.")
+                break
+                
+            url = video.get("original_url") or video.get("videoYoutubeURL") or video.get("stream_url") or video.get("url")
+            title = video.get("title", f"Video {index}")
+            
+            if not url: continue
+
+            await status_msg.edit_text(
+                f"<b>🔄 Processing {index}/{total}</b>\n"
+                f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
+                f"<emoji id=5231012545799666522>🔍</emoji> Downloading...",
+                parse_mode=ParseMode.HTML
+            )
+
+            filename = f"rmallu_video_{user_id}_{index}.mp4"
+            
+            try:
+                cmd = [
+                    "yt-dlp",
+                    "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+                    "-o", filename,
+                    "--no-playlist",
+                    "--merge-output-format", "mp4",
+                    "--referer", referer,
+                    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                    "--no-check-certificate",
+                    "--concurrent-fragments", "10"
+                ]
+                # Add specific referers for some sites if needed
+                cmd.append(url)
+                
+                returncode, stderr = await download_with_progress(cmd, message, status_msg)
+                
+                if returncode != 0 or not os.path.exists(filename):
+                     await client.send_message(message.chat.id, f"❌ <b>Fail:</b> <code>{title}</code>")
+                     continue
+
+                await status_msg.edit_text(f"🚀 <b>Uploading {index}/{total} to YouTube...</b>", parse_mode=ParseMode.HTML)
+                
+                description = f"Bulk Upload: {title}\nSubject: {video.get('subject_name_ext')}"
+                
+                # Use thread-safe upload
+                yt_link, channel_name = await asyncio.to_thread(upload_to_youtube, filename, title, description)
+                
+                await client.send_message(
+                    message.chat.id,
+                    f"<emoji id=5429381339851796035>✅</emoji> <b>Bulk Upload Success!</b>\n\n"
+                    f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
+                    f"<emoji id=5271604874419647061>🔗</emoji> <b>Link:</b> {yt_link}",
+                    # f"🎬 <b>Channel:</b> {channel_name}",
+                    disable_web_page_preview=True,
+                    reply_to_message_id=message.id
+                )
+                dl_queue.on_success(user_id)
+                
+            except Exception as e:
+                await client.send_message(message.chat.id, f"⚠️ Error {index}: `{e}`")
+            finally:
+                if os.path.exists(filename): os.remove(filename)
+
+        await status_msg.edit_text("<emoji id=5458603043203327669>🔔</emoji> <b>All bulk YouTube uploads processed!</b>")
+
+    except Exception as e:
+        await status_msg.edit_text(f"⚠️ Error reading JSON: `{e}`")
+    finally:
+        if message.id in task_cancel_flags: del task_cancel_flags[message.id]
         if os.path.exists(json_path): os.remove(json_path)
 
 @app.on_message(filters.command("cancel") & filters.reply)
