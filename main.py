@@ -111,7 +111,7 @@ class DownloadQueue:
         
         # 1. One at a time per user
         if self.user_active.get(user_id):
-            await message.reply_text("❌ <b>Access Denied!</b>\n\nYou already have an active download. Please wait until it's finished.", parse_mode=ParseMode.HTML)
+            await message.reply_text("<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nYou already have an active download. Please wait until it's finished.", parse_mode=ParseMode.HTML)
             return False
 
         # 2. Rate limiting (2 downloads -> 10-14m wait)
@@ -596,7 +596,7 @@ def upload_to_youtube(file_path, title, description, category_id="27", privacy_s
 async def start_handler(client, message: Message):
     if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
-            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
         )
@@ -634,7 +634,7 @@ async def start_handler(client, message: Message):
 async def afs_link_handler(client, message: Message):
     if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
-            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
         )
@@ -780,7 +780,7 @@ async def afs_link_handler(client, message: Message):
 async def ba_link_handler(client, message: Message):
     if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
-            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
         )
@@ -895,7 +895,7 @@ async def ba_link_handler(client, message: Message):
 async def rm_link_handler(client, message: Message):
     if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
-            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
         )
@@ -1039,7 +1039,7 @@ async def rm_link_handler(client, message: Message):
 async def rmu_link_handler(client, message: Message):
     if not is_admin(message.from_user.id):
         await message.reply_text(
-            "❌ <b>Admin Only Command!</b>\n\nOnly administrators can use this command.",
+            "<emoji id=5210952531676504517>❌</emoji> <b>Admin Only Command!</b>\n\nOnly administrators can use this command.",
             parse_mode=ParseMode.HTML
         )
         return
@@ -1102,10 +1102,10 @@ async def rmu_link_handler(client, message: Message):
         returncode, stderr = await download_with_progress(cmd, message, status_msg)
         
         if returncode != 0 or not os.path.exists(filename):
-            await status_msg.edit_text("❌ Download failed.")
+            await status_msg.edit_text(" <emoji id=5210952531676504517>❌</emoji> <b>Download failed.</b>", parse_mode=ParseMode.HTML)
             return
 
-        await status_msg.edit_text("🚀 <b>Uploading to YouTube... (Unlisted)</b>", parse_mode=ParseMode.HTML)
+        await status_msg.edit_text(" <emoji id=5217880283860194582>🚀</emoji> <b>Uploading to YouTube... (Unlisted)</b>", parse_mode=ParseMode.HTML)
         
         description = f"RM Video Uploaded via Telegram Bot by {message.from_user.first_name}"
         
@@ -1113,11 +1113,11 @@ async def rmu_link_handler(client, message: Message):
         yt_link, channel_name = await asyncio.to_thread(upload_to_youtube, filename, title, description)
         
         await status_msg.edit_text(
-            f"✅ <b>Successfully Uploaded to YouTube!</b>\n\n"
-            f"🎬 <b>Channel:</b> <code>{channel_name}</code>\n"
-            f"🎬 <b>Title:</b> <code>{title}</code>\n"
-            f"🔗 <b>Link:</b> {yt_link}\n"
-            f"👁 <b>Visibility:</b> Unlisted",
+            f"<emoji id=5429381339851796035>✅</emoji> <b>Successfully Uploaded to YouTube!</b>\n\n"
+            f" <emoji id=5260291556899831755>🎬</emoji> <b>Channel:</b> <code>{channel_name}</code>\n"
+            f" <emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
+            f" <emoji id=5271604874419647061>🔗</emoji> <b>Link:</b> {yt_link}\n"
+            f" <emoji id=5210956306952758910>👀</emoji> <b>Visibility:</b> Unlisted",
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True
         )
@@ -1132,7 +1132,7 @@ async def rmu_link_handler(client, message: Message):
 async def shikho_link_handler(client, message: Message):
     if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
-            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
         )
@@ -1277,7 +1277,7 @@ async def shikho_link_handler(client, message: Message):
 async def hk_link_handler(client, message: Message):
     if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
-            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
         )
@@ -1414,7 +1414,7 @@ async def hk_link_handler(client, message: Message):
 async def udvash_link_handler(client, message: Message):
     if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
-            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
         )
@@ -1544,7 +1544,7 @@ async def udvash_link_handler(client, message: Message):
 async def yt_link_handler(client, message: Message):
     if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
-            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
         )
@@ -1703,7 +1703,7 @@ async def yt_link_handler(client, message: Message):
 async def social_dl_handler(client: Client, message: Message):
     if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
-            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
         )
@@ -1788,7 +1788,7 @@ async def social_dl_handler(client: Client, message: Message):
         
         width, height, duration = await get_video_metadata(filename)
         user_name = message.from_user.first_name or "User"
-        caption = f"🎬 <b>Title:</b> <code>{title}</code>\n👤 <b>By:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
+        caption = f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n👤 <b>By:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
 
         start_upload = time.time()
         await send_video_with_fallback(
@@ -1810,7 +1810,7 @@ async def social_dl_handler(client: Client, message: Message):
 async def get_emoji_id(client, message: Message):
     if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
-            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
         )
@@ -1911,14 +1911,14 @@ async def cookies_handler(client, message: Message):
 async def rmd_json_handler(client: Client, message: Message):
     if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
-            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
         )
         return
     user_id = message.from_user.id
     if not is_admin(user_id):
-        await message.reply_text("❌ <b>Access Denied!</b>\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
+        await message.reply_text("<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot is private and only available to the authorized administrator.", parse_mode=ParseMode.HTML)
         return
 
     # Queue Check
@@ -1970,7 +1970,7 @@ async def rmd_json_handler(client: Client, message: Message):
             # Update progress status
             await status_msg.edit_text(
                 f"<b>🔄 Processing Video {index}/{total}</b>\n\n"
-                f"🎬 <b>Title:</b> <code>{title}</code>\n"
+                f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
                 f"<emoji id=5231012545799666522>🔍</emoji> Preparing download...",
                 parse_mode=ParseMode.HTML
             )
@@ -2134,14 +2134,14 @@ async def rmd_json_handler(client: Client, message: Message):
 async def add_admin_handler(client, message: Message):
     if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
-            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
         )
         return
     user_id = message.from_user.id
     if not is_super_admin(user_id):
-        await message.reply_text("❌ <b>Access Denied!</b> Only Super Admins (fixed in .env) can add other admins!", parse_mode=ParseMode.HTML)
+        await message.reply_text("<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b> Only Super Admins (fixed in .env) can add other admins!", parse_mode=ParseMode.HTML)
         return
 
     target_id = None
@@ -2171,14 +2171,14 @@ async def add_admin_handler(client, message: Message):
 async def remove_admin_handler(client, message: Message):
     if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
-            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
         )
         return
     user_id = message.from_user.id
     if not is_super_admin(user_id):
-        await message.reply_text("❌ <b>Access Denied!</b> Only Super Admins (fixed in .env) can remove admins!", parse_mode=ParseMode.HTML)
+        await message.reply_text("<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b> Only Super Admins (fixed in .env) can remove admins!", parse_mode=ParseMode.HTML)
         return
 
     target_id = None
@@ -2218,7 +2218,7 @@ async def remove_admin_handler(client, message: Message):
 async def list_admins_handler(client, message: Message):
     if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
-            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
         )
@@ -2244,14 +2244,14 @@ async def list_admins_handler(client, message: Message):
 async def rmall_handler(client: Client, message: Message):
     if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
-            "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+            "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
         )
         return
     user_id = message.from_user.id
     if not is_admin(user_id):
-        await message.reply_text("❌ <b>Access Denied!</b>", parse_mode=ParseMode.HTML)
+        await message.reply_text("<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>", parse_mode=ParseMode.HTML)
         return
 
     # Queue Check
@@ -2313,7 +2313,7 @@ async def rmall_handler(client: Client, message: Message):
             await status_msg.edit_text(
                 f"<b>🔄 Processing {index}/{total}</b>\n"
                 f"📚 <b>Sub:</b> <code>{subject_name}</code>\n"
-                f"🎬 <b>Title:</b> <code>{title}</code>",
+                f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>",
                 parse_mode=ParseMode.HTML
             )
 
@@ -2421,7 +2421,7 @@ async def rmall_handler(client: Client, message: Message):
 @app.on_message(filters.command("cancel") & filters.reply)
 async def cancel_handler(client: Client, message: Message):
     if not is_admin(message.from_user.id):
-        await message.reply_text("❌ <b>Access Denied!</b> Only admins can cancel downloads.", parse_mode=ParseMode.HTML)
+        await message.reply_text("<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b> Only admins can cancel downloads.", parse_mode=ParseMode.HTML)
         return
 
     replied_msg = message.reply_to_message
@@ -2454,7 +2454,7 @@ async def cancel_handler(client: Client, message: Message):
 @app.on_message(filters.command("up") & filters.reply)
 async def up_handler(client, message: Message):
     if not is_admin(message.from_user.id):
-        await message.reply_text("❌ <b>Access Denied!</b> Only for admins.", parse_mode=ParseMode.HTML)
+        await message.reply_text("<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b> Only for admins.", parse_mode=ParseMode.HTML)
         return
     
     replied_msg = message.reply_to_message
@@ -2475,7 +2475,7 @@ async def up_handler(client, message: Message):
             await status_msg.edit_text("❌ Failed to download video from Telegram.")
             return
         
-        await status_msg.edit_text("🚀 <b>Uploading to YouTube... (Unlisted)</b>", parse_mode=ParseMode.HTML)
+        await status_msg.edit_text(" <emoji id=5217880283860194582>🚀</emoji> <b>Uploading to YouTube... (Unlisted)</b>", parse_mode=ParseMode.HTML)
         
         # Get title from caption or file name
         title = replied_msg.caption[:100] if replied_msg.caption else "Video Upload"
@@ -2488,15 +2488,15 @@ async def up_handler(client, message: Message):
         yt_link, channel_name = await asyncio.to_thread(upload_to_youtube, file_path, title, description)
         
         await status_msg.edit_text(
-            f"✅ <b>Successfully Uploaded to YouTube!</b>\n\n"
-            f"🎬 <b>Channel:</b> <code>{channel_name}</code>\n"
-            f"🔗 <b>Link:</b> {yt_link}\n"
-            f"👁 <b>Visibility:</b> Unlisted",
+            f"<emoji id=5429381339851796035>✅</emoji> <b>Successfully Uploaded to YouTube!</b>\n\n"
+            f"<emoji id=5260291556899831755>🎬</emoji> <b>Channel:</b> <code>{channel_name}</code>\n"
+            f"<emoji id=5271604874419647061>🔗</emoji> <b>Link:</b> {yt_link}\n"
+            f"<emoji id=5210956306952758910>👀</emoji> <b>Visibility:</b> Unlisted",
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True
         )
     except Exception as e:
-        await status_msg.edit_text(f"❌ <b>YouTube Upload Failed:</b>\n\n<code>{str(e)}</code>", parse_mode=ParseMode.HTML)
+        await status_msg.edit_text(f"<emoji id=5210952531676504517>❌</emoji> <b>YouTube Upload Failed:</b>\n\n<code>{str(e)}</code>", parse_mode=ParseMode.HTML)
     finally:
         if 'file_path' in locals() and os.path.exists(file_path):
             os.remove(file_path)
