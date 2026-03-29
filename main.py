@@ -18,6 +18,8 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.enums import MessageEntityType, ParseMode
 from contextlib import asynccontextmanager
+from youtube_uploader import upload_to_youtube
+
 
 # =================== Configuration ===================
 API_ID = os.environ.get("API_ID")
@@ -495,7 +497,7 @@ async def get_bunny_m3u8(url):
 # =================== Handlers ===================
 @app.on_message(filters.command("start"))
 async def start_handler(client, message: Message):
-    if message.chat.id != ALLOWED_CHAT_ID:
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
             "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
@@ -520,7 +522,8 @@ async def start_handler(client, message: Message):
         f" <emoji id=5206607081334906820>✔️</emoji> <b>AFS Downloader:</b> <code>/afs [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Facebook:</b> <code>/fb [link]</code>\n"
         f" <emoji id=5206607081334906820>✔️</emoji> <b>Instagram:</b> <code>/ig [link]</code>\n"
-        f" <emoji id=5206607081334906820>✔️</emoji> <b>TikTok:</b> <code>/tik [link]</code>\n\n"
+        f" <emoji id=5206607081334906820>✔️</emoji> <b>TikTok:</b> <code>/tik [link]</code>\n"
+        f" <emoji id=5206607081334906820>✔️</emoji> <b>YouTube Upload:</b> <code>/up (reply to video)</code>\n\n"
         f"<i>Just send me a link and let the magic happen!</i> <emoji id=5220166546491459639>🔥</emoji>"
     )
     await message.reply_text(welcome_text, parse_mode=ParseMode.HTML)
@@ -531,7 +534,7 @@ async def start_handler(client, message: Message):
 
 @app.on_message(filters.command("afs"))
 async def afs_link_handler(client, message: Message):
-    if message.chat.id != ALLOWED_CHAT_ID:
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
             "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
@@ -677,7 +680,7 @@ async def afs_link_handler(client, message: Message):
 
 @app.on_message(filters.command("ba"))
 async def ba_link_handler(client, message: Message):
-    if message.chat.id != ALLOWED_CHAT_ID:
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
             "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
@@ -792,7 +795,7 @@ async def ba_link_handler(client, message: Message):
 
 @app.on_message(filters.command("rm"))
 async def rm_link_handler(client, message: Message):
-    if message.chat.id != ALLOWED_CHAT_ID:
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
             "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
@@ -938,7 +941,7 @@ async def rm_link_handler(client, message: Message):
 
 @app.on_message(filters.command("shikho"))
 async def shikho_link_handler(client, message: Message):
-    if message.chat.id != ALLOWED_CHAT_ID:
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
             "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
@@ -1083,7 +1086,7 @@ async def shikho_link_handler(client, message: Message):
 
 @app.on_message(filters.command("hk"))
 async def hk_link_handler(client, message: Message):
-    if message.chat.id != ALLOWED_CHAT_ID:
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
             "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
@@ -1220,7 +1223,7 @@ async def hk_link_handler(client, message: Message):
 
 @app.on_message(filters.command("udvash"))
 async def udvash_link_handler(client, message: Message):
-    if message.chat.id != ALLOWED_CHAT_ID:
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
             "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
@@ -1350,7 +1353,7 @@ async def udvash_link_handler(client, message: Message):
 
 @app.on_message(filters.command("yt"))
 async def yt_link_handler(client, message: Message):
-    if message.chat.id != ALLOWED_CHAT_ID:
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
             "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
@@ -1509,7 +1512,7 @@ async def yt_link_handler(client, message: Message):
 
 @app.on_message(filters.command(["fb", "ig", "tik"]))
 async def social_dl_handler(client: Client, message: Message):
-    if message.chat.id != ALLOWED_CHAT_ID:
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
             "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
@@ -1616,7 +1619,7 @@ async def social_dl_handler(client: Client, message: Message):
 
 @app.on_message(filters.command("id"))
 async def get_emoji_id(client, message: Message):
-    if message.chat.id != ALLOWED_CHAT_ID:
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
             "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
@@ -1678,7 +1681,7 @@ async def get_emoji_id(client, message: Message):
 
 @app.on_message(filters.document)
 async def cookies_handler(client, message: Message):
-    if message.chat.id != ALLOWED_CHAT_ID:
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         return
     user_id = message.from_user.id
     
@@ -1717,7 +1720,7 @@ async def cookies_handler(client, message: Message):
 
 @app.on_message(filters.command("rmd"))
 async def rmd_json_handler(client: Client, message: Message):
-    if message.chat.id != ALLOWED_CHAT_ID:
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
             "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
@@ -1940,7 +1943,7 @@ async def rmd_json_handler(client: Client, message: Message):
 # =================== Admin Management ===================
 @app.on_message(filters.command("addadmin"))
 async def add_admin_handler(client, message: Message):
-    if message.chat.id != ALLOWED_CHAT_ID:
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
             "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
@@ -1977,7 +1980,7 @@ async def add_admin_handler(client, message: Message):
 
 @app.on_message(filters.command("rmadmin"))
 async def remove_admin_handler(client, message: Message):
-    if message.chat.id != ALLOWED_CHAT_ID:
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
             "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
@@ -2024,7 +2027,7 @@ async def remove_admin_handler(client, message: Message):
 
 @app.on_message(filters.command("admins"))
 async def list_admins_handler(client, message: Message):
-    if message.chat.id != ALLOWED_CHAT_ID:
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
             "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
@@ -2050,7 +2053,7 @@ async def list_admins_handler(client, message: Message):
 
 @app.on_message(filters.command("rmall"))
 async def rmall_handler(client: Client, message: Message):
-    if message.chat.id != ALLOWED_CHAT_ID:
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
         await message.reply_text(
             "❌ <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
             parse_mode=ParseMode.HTML,
@@ -2258,6 +2261,56 @@ async def cancel_handler(client: Client, message: Message):
         await message.reply_text("✅ <b>Cancellation Signal Sent!</b>\n\nThe current process has been terminated.", parse_mode=ParseMode.HTML)
     else:
         await message.reply_text("⚠️ <b>No active process found</b> for this message.\n\nMake sure you are replying to an active progress bar or the original command message.", parse_mode=ParseMode.HTML)
+
+@app.on_message(filters.command("up") & filters.reply)
+async def up_handler(client, message: Message):
+    if not is_admin(message.from_user.id):
+        await message.reply_text("❌ <b>Access Denied!</b> Only for admins.", parse_mode=ParseMode.HTML)
+        return
+    
+    replied_msg = message.reply_to_message
+    if not (replied_msg.video or replied_msg.document or replied_msg.animation):
+        await message.reply_text("❌ Please reply to a <b>video file</b> with /up", parse_mode=ParseMode.HTML)
+        return
+    
+    # Check if document is a video
+    if replied_msg.document and not (replied_msg.document.mime_type and replied_msg.document.mime_type.startswith("video/")):
+        await message.reply_text("❌ This document is not a video.", parse_mode=ParseMode.HTML)
+        return
+
+    status_msg = await message.reply_text("⏳ <b>Downloading video from Telegram...</b>", parse_mode=ParseMode.HTML)
+    
+    try:
+        file_path = await client.download_media(replied_msg)
+        if not file_path:
+            await status_msg.edit_text("❌ Failed to download video from Telegram.")
+            return
+        
+        await status_msg.edit_text("🚀 <b>Uploading to YouTube... (Unlisted)</b>", parse_mode=ParseMode.HTML)
+        
+        # Get title from caption or file name
+        title = replied_msg.caption[:100] if replied_msg.caption else "Video Upload"
+        if not title:
+            title = os.path.basename(file_path)[:100]
+            
+        description = f"Uploaded via Telegram Bot by Admin {message.from_user.id}"
+        
+        # Run the async upload (which has sync blocks inside)
+        yt_link, channel_name = await upload_to_youtube(file_path, title, description)
+        
+        await status_msg.edit_text(
+            f"✅ <b>Successfully Uploaded to YouTube!</b>\n\n"
+            f"🎬 <b>Channel:</b> <code>{channel_name}</code>\n"
+            f"🔗 <b>Link:</b> {yt_link}\n"
+            f"👁 <b>Visibility:</b> Unlisted",
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True
+        )
+    except Exception as e:
+        await status_msg.edit_text(f"❌ <b>YouTube Upload Failed:</b>\n\n<code>{str(e)}</code>", parse_mode=ParseMode.HTML)
+    finally:
+        if 'file_path' in locals() and os.path.exists(file_path):
+            os.remove(file_path)
 
 # =================== Main ===================
 if __name__ == "__main__":
