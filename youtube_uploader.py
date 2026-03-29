@@ -15,25 +15,27 @@ SCOPES = [
 def get_youtube_service():
     creds = None
     
-    # Check if token exists in environment variable first
-    token_json = os.environ.get('YOUTUBE_TOKEN_JSON')
-    if token_json:
+    # 1. Check if token exists in environment variable (Prioritize this for GitHub/Prod)
+    token_env = os.environ.get('YOUTUBE_TOKEN_JSON')
+    if token_env:
         try:
-            creds_data = json.loads(token_json)
+            creds_data = json.loads(token_env)
             creds = Credentials.from_authorized_user_info(creds_data, SCOPES)
+            print("✅ YouTube Token loaded from ENV.")
         except Exception as e:
-            print(f"Error loading YOUTUBE_TOKEN_JSON from ENV: {e}")
+            print(f"❌ Error loading YOUTUBE_TOKEN_JSON from ENV: {e}")
 
-    # Fallback to file storage if not in ENV
+    # 2. Fallback to file storage if not in ENV
     if not creds and os.path.exists('token.json'):
         creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+        print("📁 YouTube Token loaded from token.json file.")
 
-    # If there are no (valid) credentials available, let the user log in.
+    # 3. Handle login if no credentials
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            # Check for client secrets in ENV
+            # Check for client secrets in ENV or File
             client_secrets_env = os.environ.get('GOOGLE_CLIENT_SECRETS_JSON')
             if client_secrets_env:
                 client_config = json.loads(client_secrets_env)
@@ -43,19 +45,14 @@ def get_youtube_service():
             else:
                 raise FileNotFoundError("GOOGLE_CLIENT_SECRETS_JSON not found in ENV or client_secrets.json not found.")
 
-            # Modification for environments without a browser (like VPS/Server)
-            try:
-                # This will try to start a local server but won't try to open a browser automatically
-                creds = flow.run_local_server(port=0, open_browser=False)
-            except Exception:
-                # If local server fails (e.g. port blocked), try to use the console-based flow
-                # Note: 'run_console' is deprecated in newer versions, but this is a fallback.
-                print("\n⚠️  Could not automatically open a browser. Please copy and paste this URL into your browser:")
-                creds = flow.run_local_server(port=0, open_browser=False)
+            # Headless login for VPS
+            creds = flow.run_local_server(port=0, open_browser=False)
             
-        # Save the credentials for the next run (to file)
-        with open('token.json', 'w') as token_file:
-            token_file.write(creds.to_json())
+        # 4. Save credentials (only to file if we don't have it in ENV)
+        if not os.environ.get('YOUTUBE_TOKEN_JSON'):
+            with open('token.json', 'w') as token_file:
+                token_file.write(creds.to_json())
+            print("💾 New credentials saved to token.json. Copy this into your .env as YOUTUBE_TOKEN_JSON!")
 
     return build('youtube', 'v3', credentials=creds)
 
