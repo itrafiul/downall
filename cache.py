@@ -20,11 +20,19 @@ def init_supabase():
     else:
         print("⚠️ Supabase not configured. Caching disabled.")
 
+import re
+
 def normalize_url(url: str) -> str:
     """Normalize URL for consistent cache lookups."""
     url = url.strip().rstrip("/")
     if "youtube.com" in url or "youtu.be" in url:
         return url # Don't strip queries for yt, as ?v= matters
+        
+    # Extract BunnyCDN/MediaDelivery Video ID format (LibraryID/UUID)
+    # e.g. 342579/70241195-3be6-4852-a89a-f5e8dc330255
+    bunny_match = re.search(r'(\d+/[a-fA-F0-9\-]{36})', url)
+    if bunny_match:
+        return bunny_match.group(1)
     
     # Remove common tracking parameters for educational vids
     if "?" in url:
