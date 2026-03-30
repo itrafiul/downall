@@ -24,14 +24,17 @@ from googleapiclient.http import MediaFileUpload
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 
+from cache import init_supabase, get_cached_video, save_to_cache, CACHE_CHANNEL_ID
+
 
 # =================== Configuration ===================
 API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+ALLOWED_CHAT_ID = int(os.environ.get("ALLOWED_CHAT_ID", "-100"))
 
 ADMINS_FILE = "admins.json"
-ALLOWED_CHAT_ID = -1003648612088
+
 
 def load_admins():
     """Load admin IDs from file and environment."""
@@ -591,17 +594,84 @@ def upload_to_youtube(file_path, title, description, category_id="27", privacy_s
     
     return yt_link, channel_title
 
+# =================== Cache Helpers ===================
+async def check_and_serve_cache(client, message: Message, url: str, status_msg: Message) -> bool:
+    cached = get_cached_video(url)
+    if cached:
+        user_name = message.from_user.first_name or "User"
+        title = cached.get('title', 'Video')
+        rich_caption = (
+            f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
+            f"<emoji id=5251203410396458957>👤</emoji> <b>Fetched by:</b> <a href='tg://user?id={message.from_user.id}'>{user_name}</a>"
+        )
+        try:
+            if cached.get("file_type") == "document":
+                await client.send_document(chat_id=message.chat.id, document=cached["file_id"], caption=rich_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+            else:
+                await client.send_video(chat_id=message.chat.id, video=cached["file_id"], caption=rich_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+            await status_msg.delete()
+            dl_queue.on_success(message.from_user.id)
+            return True
+        except Exception as e:
+            print(f"Cache send fail: {e}")
+    return False
+
+async def cached_upload(client, chat_id, url, filename, thumb_name, title, rich_caption, duration, width, height, message, status_msg, start_upload, command_type):
+    upload_chat_id = CACHE_CHANNEL_ID if CACHE_CHANNEL_ID != 0 else chat_id
+    
+    sent_msg = await send_video_with_fallback(
+        client=client,
+        chat_id=upload_chat_id,
+        filepath=filename,
+        thumb=thumb_name,
+        caption=rich_caption if upload_chat_id == chat_id else f"📦 Cache: {title}",
+        duration=duration,
+        width=width,
+        height=height,
+        reply_to_id=None if upload_chat_id == CACHE_CHANNEL_ID else message.id,
+        progress=upload_progress,
+        progress_args=(client, status_msg, start_upload)
+    )
+    
+    if upload_chat_id == CACHE_CHANNEL_ID and sent_msg:
+        fid = None
+        ftype = "video"
+        if sent_msg.video:
+            fid = sent_msg.video.file_id
+        elif sent_msg.document:
+            fid = sent_msg.document.file_id
+            ftype = "document"
+            
+        if fid:
+            save_to_cache(url, fid, ftype, title, duration, width, height, os.path.getsize(filename), CACHE_CHANNEL_ID, sent_msg.id, command_type)
+            
+        # Send to user
+        try:
+            if ftype == "video":
+                await client.send_video(chat_id=chat_id, video=fid, caption=rich_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+            else:
+                await client.send_document(chat_id=chat_id, document=fid, caption=rich_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+        except Exception as e:
+            print(f"Failed to forward cached video: {e}")
+
 # =================== Handlers ===================
 @app.on_message(filters.command("start"))
 async def start_handler(client, message: Message):
+    print(f"DEBUG: Received /start from user: {message.from_user.id} in chat: {message.chat.id}")
     if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
-        await message.reply_text(
-            "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
-        )
+        print("DEBUG: Access Denied sending reply...")
+        try:
+            await message.reply_text(
+                "<emoji id=5210952531676504517>❌</emoji> <b>Access Denied!</b>\n\nThis bot only works in the authorized group.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Join Authorized Group", url="https://t.me/navigatesupport")]])
+            )
+            print("DEBUG: Reply sent successfully!")
+        except Exception as e:
+            print(f"DEBUG: Error sending reply: {e}")
         return
     user_id = message.from_user.id
+    print(f"DEBUG: User {user_id} is recognized as Admin or in allowed chat.")
     bot_info = await client.get_me()
 
     bot_name = bot_info.first_name
@@ -627,9 +697,11 @@ async def start_handler(client, message: Message):
     )
     await message.reply_text(welcome_text, parse_mode=ParseMode.HTML)
 
-
-
-
+@app.on_message(filters.command("getid"))
+async def get_id_handler(client, message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    await message.reply_text(f"ID is: <code>{message.chat.id}</code>", parse_mode=ParseMode.HTML)
 
 @app.on_message(filters.command("afs"))
 async def afs_link_handler(client, message: Message):
@@ -670,6 +742,9 @@ async def afs_link_handler(client, message: Message):
         return
 
     status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Processing AFS video...", parse_mode=ParseMode.HTML)
+
+    if await check_and_serve_cache(client, message, url, status_msg):
+        return
 
     filename = f"afs_video_{user_id}_{int(time.time())}.mp4"
     thumb_name = None
@@ -754,18 +829,21 @@ async def afs_link_handler(client, message: Message):
         )
 
         start_upload = time.time()
-        await send_video_with_fallback(
+        await cached_upload(
             client=client,
             chat_id=message.chat.id,
-            filepath=filename,
-            thumb=thumb_name,
-            caption=rich_caption,
+            url=url,
+            filename=filename,
+            thumb_name=thumb_name,
+            title=title,
+            rich_caption=rich_caption,
             duration=duration,
             width=width,
             height=height,
-            reply_to_id=message.id,
-            progress=upload_progress,
-            progress_args=(client, status_msg, start_upload)
+            message=message,
+            status_msg=status_msg,
+            start_upload=start_upload,
+            command_type="afs"
         )
         dl_queue.on_success(user_id)
         await status_msg.delete()
@@ -796,6 +874,7 @@ async def ba_link_handler(client, message: Message):
     player_url = None
     
     if len(parts) >= 2: player_url = parts[1]
+    elif len(parts) == 1 and parts[0].startswith("http"): player_url = parts[0]
     elif message.reply_to_message and message.reply_to_message.text:
         player_url = message.reply_to_message.text.strip()
         
@@ -835,6 +914,10 @@ async def ba_link_handler(client, message: Message):
         return
 
     status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> <b>Stream found! Downloading...</b>", parse_mode=ParseMode.HTML)
+    
+    if await check_and_serve_cache(client, message, real_m3u8, status_msg):
+        return
+        
     filename = f"ba_video_{user_id}_{int(time.time())}.mp4"
     title = "Biology Adda Video"
     
@@ -878,11 +961,21 @@ async def ba_link_handler(client, message: Message):
         )
 
         start_upload = time.time()
-        await send_video_with_fallback(
-            client=client, chat_id=message.chat.id, filepath=filename,
-            thumb=None, caption=rich_caption, duration=duration,
-            width=width, height=height, reply_to_id=message.id,
-            progress=upload_progress, progress_args=(client, status_msg, start_upload)
+        await cached_upload(
+            client=client,
+            chat_id=message.chat.id,
+            url=real_m3u8,
+            filename=filename,
+            thumb_name=None,
+            title=title,
+            rich_caption=rich_caption,
+            duration=duration,
+            width=width,
+            height=height,
+            message=message,
+            status_msg=status_msg,
+            start_upload=start_upload,
+            command_type="ba"
         )
         dl_queue.on_success(user_id)
         await status_msg.delete()
@@ -908,14 +1001,16 @@ async def rm_link_handler(client, message: Message):
 
     async with dl_queue.acquire_global(user_id, message):
         parts = message.text.split()
-    url = None
+    url = getattr(message, "auto_url", None)
     referer = "https://iframe.mediadelivery.net"
     
-    if len(parts) >= 2:
-        url = parts[1]
-        
-    if not url and message.reply_to_message and message.reply_to_message.text:
-        url = message.reply_to_message.text.strip()
+    if not url:
+        if len(parts) >= 2:
+            url = parts[1]
+        elif len(parts) == 1 and parts[0].startswith("http"):
+            url = parts[0]
+        elif message.reply_to_message and message.reply_to_message.text:
+            url = message.reply_to_message.text.strip()
         
     if not url:
         await message.reply_text("<emoji id=5274099962655816924>❗</emoji> Please provide an RM URL.\nUsage: /rm <URL>", parse_mode=ParseMode.HTML)
@@ -931,6 +1026,9 @@ async def rm_link_handler(client, message: Message):
         return
 
     status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Processing RM video...", parse_mode=ParseMode.HTML)
+
+    if await check_and_serve_cache(client, message, url, status_msg):
+        return
 
     filename = f"rm_video_{user_id}_{int(time.time())}.mp4"
     thumb_name = None
@@ -1015,18 +1113,21 @@ async def rm_link_handler(client, message: Message):
         )
 
         start_upload = time.time()
-        await send_video_with_fallback(
+        await cached_upload(
             client=client,
             chat_id=message.chat.id,
-            filepath=filename,
-            thumb=thumb_name,
-            caption=rich_caption,
+            url=url,
+            filename=filename,
+            thumb_name=thumb_name,
+            title=title,
+            rich_caption=rich_caption,
             duration=duration,
             width=width,
             height=height,
-            reply_to_id=message.id,
-            progress=upload_progress,
-            progress_args=(client, status_msg, start_upload)
+            message=message,
+            status_msg=status_msg,
+            start_upload=start_upload,
+            command_type="rm"
         )
         dl_queue.on_success(user_id)
         await status_msg.delete()
@@ -1150,6 +1251,8 @@ async def shikho_link_handler(client, message: Message):
     
     if len(parts) >= 2:
         url = parts[1]
+    elif len(parts) == 1 and parts[0].startswith("http"):
+        url = parts[0]
         
     if not url and message.reply_to_message and message.reply_to_message.text:
         url = message.reply_to_message.text.strip()
@@ -1168,6 +1271,9 @@ async def shikho_link_handler(client, message: Message):
         return
 
     status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Processing Shikho video...", parse_mode=ParseMode.HTML)
+
+    if await check_and_serve_cache(client, message, url, status_msg):
+        return
 
     filename = f"shikho_video_{user_id}_{int(time.time())}.mp4"
     thumb_name = None
@@ -1252,18 +1358,21 @@ async def shikho_link_handler(client, message: Message):
         )
 
         start_upload = time.time()
-        await send_video_with_fallback(
+        await cached_upload(
             client=client,
             chat_id=message.chat.id,
-            filepath=filename,
-            thumb=thumb_name,
-            caption=rich_caption,
+            url=url,
+            filename=filename,
+            thumb_name=thumb_name,
+            title=title,
+            rich_caption=rich_caption,
             duration=duration,
             width=width,
             height=height,
-            reply_to_id=message.id,
-            progress=upload_progress,
-            progress_args=(client, status_msg, start_upload)
+            message=message,
+            status_msg=status_msg,
+            start_upload=start_upload,
+            command_type="shikho"
         )
         dl_queue.on_success(user_id)
         await status_msg.delete()
@@ -1314,6 +1423,9 @@ async def hk_link_handler(client, message: Message):
         return
 
     status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Processing HK video...", parse_mode=ParseMode.HTML)
+
+    if await check_and_serve_cache(client, message, url, status_msg):
+        return
 
     filename = f"hk_video_{user_id}_{int(time.time())}.mp4"
     thumb_name = None
@@ -1387,18 +1499,21 @@ async def hk_link_handler(client, message: Message):
         )
 
         start_upload = time.time()
-        await send_video_with_fallback(
+        await cached_upload(
             client=client,
             chat_id=message.chat.id,
-            filepath=filename,
-            thumb=thumb_name,
-            caption=rich_caption,
+            url=url,
+            filename=filename,
+            thumb_name=thumb_name,
+            title=title,
+            rich_caption=rich_caption,
             duration=duration,
             width=width,
             height=height,
-            reply_to_id=message.id,
-            progress=upload_progress,
-            progress_args=(client, status_msg, start_upload)
+            message=message,
+            status_msg=status_msg,
+            start_upload=start_upload,
+            command_type="hk"
         )
         dl_queue.on_success(user_id)
         await status_msg.delete()
@@ -1449,6 +1564,9 @@ async def udvash_link_handler(client, message: Message):
         return
 
     status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> Processing Udvash video...", parse_mode=ParseMode.HTML)
+
+    if await check_and_serve_cache(client, message, url, status_msg):
+        return
 
     filename = f"udvash_video_{user_id}_{int(time.time())}.mp4"
     thumb_name = None
@@ -1518,18 +1636,21 @@ async def udvash_link_handler(client, message: Message):
         )
 
         start_upload = time.time()
-        await send_video_with_fallback(
+        await cached_upload(
             client=client,
             chat_id=message.chat.id,
-            filepath=filename,
-            thumb=thumb_name,
-            caption=rich_caption,
+            url=url,
+            filename=filename,
+            thumb_name=thumb_name,
+            title=title,
+            rich_caption=rich_caption,
             duration=duration,
             width=width,
             height=height,
-            reply_to_id=message.id,
-            progress=upload_progress,
-            progress_args=(client, status_msg, start_upload)
+            message=message,
+            status_msg=status_msg,
+            start_upload=start_upload,
+            command_type="udvash"
         )
         dl_queue.on_success(user_id)
         await status_msg.delete()
@@ -1579,6 +1700,9 @@ async def yt_link_handler(client, message: Message):
         return
 
     status_msg = await message.reply_text("<emoji id=5231012545799666522>🔍</emoji> <b>Processing YouTube video... Please wait!</b>", parse_mode=ParseMode.HTML)
+
+    if await check_and_serve_cache(client, message, url, status_msg):
+        return
 
     filename = f"yt_video_{user_id}_{int(time.time())}.mp4"
     thumb_name = None
@@ -1676,18 +1800,21 @@ async def yt_link_handler(client, message: Message):
         )
 
         start_upload = time.time()
-        await send_video_with_fallback(
+        await cached_upload(
             client=client,
             chat_id=message.chat.id,
-            filepath=filename,
-            thumb=thumb_name,
-            caption=rich_caption,
+            url=url,
+            filename=filename,
+            thumb_name=thumb_name,
+            title=title,
+            rich_caption=rich_caption,
             duration=duration,
             width=width,
             height=height,
-            reply_to_id=message.id,
-            progress=upload_progress,
-            progress_args=(client, status_msg, start_upload)
+            message=message,
+            status_msg=status_msg,
+            start_upload=start_upload,
+            command_type="yt"
         )
         dl_queue.on_success(user_id)
         await status_msg.delete()
@@ -1715,22 +1842,31 @@ async def social_dl_handler(client: Client, message: Message):
     if not await dl_queue.can_start(user_id, message): return
 
     async with dl_queue.acquire_global(user_id, message):
-        cmd_used = message.command[0]
+        try:
+            cmd_used = message.command[0] if message.command else "social"
+        except: cmd_used = "social"
     site_map = {"fb": "Facebook", "ig": "Instagram", "tik": "TikTok"}
     site_name = site_map.get(cmd_used, "Social")
 
     parts = message.text.split()
-    url = None
-    if len(parts) >= 2:
-        url = parts[1]
-    elif message.reply_to_message and message.reply_to_message.text:
-        url = message.reply_to_message.text.strip()
+    url = getattr(message, "auto_url", None)
+    if not url:
+        if len(parts) >= 2:
+            url = parts[1]
+        elif len(parts) == 1 and parts[0].startswith("http"):
+            url = parts[0]
+        elif message.reply_to_message and message.reply_to_message.text:
+            url = message.reply_to_message.text.strip()
         
     if not url:
         await message.reply_text(f"<emoji id=5274099962655816924>❗</emoji> Please provide a {site_name} link.\nUsage: /{cmd_used} <URL>")
         return
 
     status_msg = await message.reply_text(f"<emoji id=5231012545799666522>🔍</emoji> <b>Processing {site_name} video...</b>", parse_mode=ParseMode.HTML)
+    
+    if await check_and_serve_cache(client, message, url, status_msg):
+        return
+        
     filename = f"{cmd_used}_video_{user_id}_{int(time.time())}.mp4"
     thumb_name = None
     
@@ -1792,11 +1928,10 @@ async def social_dl_handler(client: Client, message: Message):
         caption = f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n👤 <b>By:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
 
         start_upload = time.time()
-        await send_video_with_fallback(
-            client=client, chat_id=message.chat.id, filepath=filename,
-            thumb=thumb_name, caption=caption, duration=duration,
-            width=width, height=height, reply_to_id=message.id,
-            progress=upload_progress, progress_args=(client, status_msg, start_upload)
+        await cached_upload(
+            client=client, chat_id=message.chat.id, url=url, filename=filename,
+            thumb_name=thumb_name, title=title, rich_caption=caption, duration=duration,
+            width=width, height=height, message=message, status_msg=status_msg, start_upload=start_upload, command_type=cmd_used
         )
         dl_queue.on_success(user_id)
         await status_msg.delete()
@@ -1975,6 +2110,25 @@ async def rmd_json_handler(client: Client, message: Message):
                 f"<emoji id=5231012545799666522>🔍</emoji> Preparing download...",
                 parse_mode=ParseMode.HTML
             )
+            
+            cached = get_cached_video(url)
+            if cached:
+                await status_msg.edit_text(
+                    f"<b>🔄 Serving from Cache {index}/{total}...</b>\n\n"
+                    f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>",
+                    parse_mode=ParseMode.HTML
+                )
+                try:
+                    user_name = message.from_user.first_name or "User"
+                    caption = f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
+                    caption += f"<emoji id=5251203410396458957>👤</emoji> <b>Fetched by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
+                    if cached.get("file_type") == "document":
+                        await client.send_document(chat_id=message.chat.id, document=cached["file_id"], caption=caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+                    else:
+                        await client.send_video(chat_id=message.chat.id, video=cached["file_id"], caption=caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+                except Exception as e:
+                    await client.send_message(message.chat.id, f"⚠️ Cache error {index}: `{e}`")
+                continue
 
             filename = f"rmd_video_{user_id}_{int(time.time())}_{index}.mp4"
             thumb_name = None
@@ -2092,18 +2246,21 @@ async def rmd_json_handler(client: Client, message: Message):
                 rich_caption += f"\n<emoji id=5251203410396458957>👤</emoji> <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
 
                 start_upload = time.time()
-                await send_video_with_fallback(
+                await cached_upload(
                     client=client,
                     chat_id=message.chat.id,
-                    filepath=filename,
-                    thumb=thumb_name,
-                    caption=rich_caption,
+                    url=url,
+                    filename=filename,
+                    thumb_name=thumb_name,
+                    title=title,
+                    rich_caption=rich_caption,
                     duration=duration,
                     width=width,
                     height=height,
-                    reply_to_id=message.id,
-                    progress=upload_progress,
-                    progress_args=(client, status_msg, start_upload)
+                    message=message,
+                    status_msg=status_msg,
+                    start_upload=start_upload,
+                    command_type="rmd_json"
                 )
                 dl_queue.on_success(user_id)
                 
@@ -2317,6 +2474,29 @@ async def rmall_handler(client: Client, message: Message):
                 f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>",
                 parse_mode=ParseMode.HTML
             )
+            
+            cached = get_cached_video(url)
+            if cached:
+                await status_msg.edit_text(
+                    f"<b>🔄 Serving from Cache {index}/{total}...</b>\n"
+                    f"📚 <b>Sub:</b> <code>{subject_name}</code>\n"
+                    f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>",
+                    parse_mode=ParseMode.HTML
+                )
+                try:
+                    user_name = message.from_user.first_name or "User"
+                    caption = f"<emoji id=5282843764451195532>🖥</emoji> <b>Subject:</b> <code>{subject_name}</code>\n"
+                    caption += f"<emoji id=5395444784611480792>✏️</emoji> <b>Chapter:</b> <code>{chapter_name}</code>\n"
+                    caption += f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n\n"
+                    caption += f"\n <emoji id=5251203410396458957>👤</emoji> <b>Fetched by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
+                    
+                    if cached.get("file_type") == "document":
+                        await client.send_document(chat_id=message.chat.id, document=cached["file_id"], caption=caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+                    else:
+                        await client.send_video(chat_id=message.chat.id, video=cached["file_id"], caption=caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+                except Exception as e:
+                    pass
+                continue
 
             filename = f"rmall_video_{user_id}_{index}.mp4"
             thumb_name = None # In this structure we don't usually have thumbs easily
@@ -2390,18 +2570,21 @@ async def rmall_handler(client: Client, message: Message):
                 rich_caption += f"\n <emoji id=5251203410396458957>👤</emoji> <b>Downloaded by:</b> <a href='tg://user?id={user_id}'>{user_name}</a>"
 
                 start_upload = time.time()
-                await send_video_with_fallback(
+                await cached_upload(
                     client=client,
                     chat_id=message.chat.id,
-                    filepath=filename,
-                    thumb=None,
-                    caption=rich_caption,
+                    url=url,
+                    filename=filename,
+                    thumb_name=None,
+                    title=title,
+                    rich_caption=rich_caption,
                     duration=duration,
                     width=width,
                     height=height,
-                    reply_to_id=message.id,
-                    progress=upload_progress,
-                    progress_args=(client, status_msg, start_upload)
+                    message=message,
+                    status_msg=status_msg,
+                    start_upload=start_upload,
+                    command_type="rmall"
                 )
                 dl_queue.on_success(user_id)
                 
@@ -2618,8 +2801,62 @@ async def up_handler(client, message: Message):
         if 'file_path' in locals() and os.path.exists(file_path):
             os.remove(file_path)
 
+# =================== Auto Link Detection ===================
+@app.on_message(filters.text & ~filters.regex(r"^/"))
+async def auto_link_handler(client, message: Message):
+    # Only work in allowed chat or for admins
+    if message.chat.id != ALLOWED_CHAT_ID and not is_admin(message.from_user.id):
+        return
+
+    text = message.text.strip()
+    # Basic URL detection regex
+    import re
+    url_match = re.search(r'(https?://\S+)', text)
+    if not url_match:
+        return
+        
+    url = url_match.group(1)
+    # Set a custom attribute to help handlers
+    message.auto_url = url
+    
+    # 1. YouTube/Social (YouTube, FB, IG, TikTok)
+    social_domains = [
+        "youtube.com", "youtu.be", "m.youtube.com",
+        "facebook.com", "fb.watch", "fb.com", "m.facebook.com",
+        "instagram.com", "instagr.am",
+        "tiktok.com", "vt.tiktok.com"
+    ]
+    if any(domain in url for domain in social_domains):
+        await social_dl_handler(client, message)
+        return
+
+    # 2. RM & AFS (iframe.mediadelivery.net)
+    if "iframe.mediadelivery.net" in url:
+        # Both /rm and /afs use RM, we'll use rm_link_handler as default
+        await rm_link_handler(client, message)
+        return
+
+    # 3. Shikho (app.shikho.com)
+    if "shikho.com" in url or "tenbytecdn.com" in url:
+        # Shikho and Biology Adda share tenbytecdn
+        if "shikho.com" in url:
+            await shikho_link_handler(client, message)
+            return
+
+    # 4. Biology Adda
+    if "vidinfra.com" in url or "biology-adda.tenbytecdn.com" in url:
+        await ba_link_handler(client, message)
+        return
+
+    # 5. Udvash
+    if "udvash.com" in url or "udvash-unmesh.com" in url:
+        await udvash_link_handler(client, message)
+        return
+
 # =================== Main ===================
 if __name__ == "__main__":
+    init_supabase()
+    
     # Start Flask in a separate thread
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
