@@ -296,6 +296,7 @@ async def send_video_with_fallback(client, chat_id, filepath, thumb, caption, du
                     await status_msg.edit_text(f"<emoji id=5271604874419647061>📏</emoji>   <b>File > 2GB!</b> Splitting into {num_parts} parts...", parse_mode=ParseMode.HTML)
 
                 success_count = 0
+                sent_parts = []
                 ffmpeg_path = shutil.which("ffmpeg") or "ffmpeg"
                 
                 for i in range(num_parts):
@@ -324,18 +325,24 @@ async def send_video_with_fallback(client, chat_id, filepath, thumb, caption, du
                         success_count += 1
                         part_caption = f"{caption}\n\n <emoji id=5213157963023273778>💔</emoji> <b>Part {i+1} of {num_parts}</b>"
                         
-                        await send_video_with_fallback(
+                        part_msg = await send_video_with_fallback(
                             client=client, chat_id=chat_id, filepath=part_filename,
                             thumb=thumb, caption=part_caption, duration=int(seconds_per_part),
                             width=final_width, height=final_height, reply_to_id=reply_to_id,
                             progress=progress, progress_args=progress_args
                         )
+                        if part_msg:
+                            if isinstance(part_msg, list):
+                                sent_parts.extend(part_msg)
+                            else:
+                                sent_parts.append(part_msg)
+                                
                         if os.path.exists(part_filename): os.remove(part_filename)
                     else:
                         print(f"Part {i+1} failed: {stderr.decode()[:100]}")
 
                 if success_count > 0:
-                    return # Successfully uploaded parts
+                    return sent_parts # Successfully uploaded parts
                     
         except Exception as split_err:
             print(f"Fatal error in split logic: {split_err}")
@@ -619,7 +626,7 @@ async def check_and_serve_cache(client, message: Message, url: str, status_msg: 
 async def cached_upload(client, chat_id, url, filename, thumb_name, title, rich_caption, duration, width, height, message, status_msg, start_upload, command_type):
     upload_chat_id = CACHE_CHANNEL_ID if CACHE_CHANNEL_ID != 0 else chat_id
     
-    sent_msg = await send_video_with_fallback(
+    sent_msgs = await send_video_with_fallback(
         client=client,
         chat_id=upload_chat_id,
         filepath=filename,
@@ -633,26 +640,56 @@ async def cached_upload(client, chat_id, url, filename, thumb_name, title, rich_
         progress_args=(client, status_msg, start_upload)
     )
     
-    if upload_chat_id == CACHE_CHANNEL_ID and sent_msg:
-        fid = None
-        ftype = "video"
-        if sent_msg.video:
-            fid = sent_msg.video.file_id
-        elif sent_msg.document:
-            fid = sent_msg.document.file_id
-            ftype = "document"
+    if upload_chat_id == CACHE_CHANNEL_ID and sent_msgs:
+        if not isinstance(sent_msgs, list):
+            sent_msgs = [sent_msgs]
             
-        if fid:
-            save_to_cache(url, fid, ftype, title, duration, width, height, os.path.getsize(filename), CACHE_CHANNEL_ID, sent_msg.id, command_type)
-            
-        # Send to user
-        try:
-            if ftype == "video":
-                await client.send_video(chat_id=chat_id, video=fid, caption=rich_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
-            else:
-                await client.send_document(chat_id=chat_id, document=fid, caption=rich_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
-        except Exception as e:
-            print(f"Failed to forward cached video: {e}")
+        if len(sent_msgs) == 1:
+            sent_msg = sent_msgs[0]
+            fid = None
+            ftype = "video"
+            if sent_msg.video:
+                fid = sent_msg.video.file_id
+            elif sent_msg.document:
+                fid = sent_msg.document.file_id
+                ftype = "document"
+                
+            if fid:
+                save_to_cache(url, fid, ftype, title, duration, width, height, os.path.getsize(filename), CACHE_CHANNEL_ID, sent_msg.id, command_type)
+                
+            # Send to user
+            try:
+                if ftype == "video":
+                    await client.send_video(chat_id=chat_id, video=fid, caption=rich_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+                else:
+                    await client.send_document(chat_id=chat_id, document=fid, caption=rich_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+            except Exception as e:
+                print(f"Failed to forward cached video: {e}")
+        else:
+            # Multiple parts: forward all parts to user
+            for m in sent_msgs:
+                if not m: continue
+                fid = None
+                ftype = "video"
+                if m.video:
+                    fid = m.video.file_id
+                elif m.document:
+                    fid = m.document.file_id
+                    ftype = "document"
+                    
+                if fid:
+                    try:
+                        part_info = ""
+                        if m.caption and "💔" in m.caption:
+                            part_info = "\n\n" + m.caption[m.caption.find("💔"):]
+                            
+                        user_caption = rich_caption + part_info
+                        if ftype == "video":
+                            await client.send_video(chat_id=chat_id, video=fid, caption=user_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+                        else:
+                            await client.send_document(chat_id=chat_id, document=fid, caption=user_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+                    except Exception as e:
+                        print(f"Failed to forward multi-part video to user: {e}")
 
 # =================== Handlers ===================
 @app.on_message(filters.command("start"))
