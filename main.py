@@ -606,21 +606,47 @@ async def check_and_serve_cache(client, message: Message, url: str, status_msg: 
     cached = get_cached_video(url)
     if cached:
         user_name = message.from_user.first_name or "User"
-        title = cached.get('title', 'Video')
-        rich_caption = (
-            f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
-            f"<emoji id=5251203410396458957>👤</emoji> <b>Fetched by:</b> <a href='tg://user?id={message.from_user.id}'>{user_name}</a>"
-        )
-        try:
-            if cached.get("file_type") == "document":
-                await client.send_document(chat_id=message.chat.id, document=cached["file_id"], caption=rich_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
-            else:
-                await client.send_video(chat_id=message.chat.id, video=cached["file_id"], caption=rich_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
-            await status_msg.delete()
-            dl_queue.on_success(message.from_user.id)
-            return True
-        except Exception as e:
-            print(f"Cache send fail: {e}")
+        
+        # Multi-part cached video (list of entries)
+        if isinstance(cached, list):
+            title = cached[0].get('title', 'Video')
+            total_parts = len(cached)
+            rich_caption = (
+                f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
+                f"<emoji id=5251203410396458957>👤</emoji> <b>Fetched by:</b> <a href='tg://user?id={message.from_user.id}'>{user_name}</a>"
+            )
+            try:
+                for i, part in enumerate(cached, 1):
+                    part_caption = rich_caption + f"\n\n <emoji id=5213157963023273778>💔</emoji> <b>Part {i} of {total_parts}</b>"
+                    fid = part.get("file_id")
+                    ftype = part.get("file_type", "video")
+                    if fid:
+                        if ftype == "document":
+                            await client.send_document(chat_id=message.chat.id, document=fid, caption=part_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+                        else:
+                            await client.send_video(chat_id=message.chat.id, video=fid, caption=part_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+                await status_msg.delete()
+                dl_queue.on_success(message.from_user.id)
+                return True
+            except Exception as e:
+                print(f"Cache send fail (multi-part): {e}")
+        else:
+            # Single video cached
+            title = cached.get('title', 'Video')
+            rich_caption = (
+                f"<emoji id=5463107823946717464>🎬</emoji> <b>Title:</b> <code>{title}</code>\n"
+                f"<emoji id=5251203410396458957>👤</emoji> <b>Fetched by:</b> <a href='tg://user?id={message.from_user.id}'>{user_name}</a>"
+            )
+            try:
+                if cached.get("file_type") == "document":
+                    await client.send_document(chat_id=message.chat.id, document=cached["file_id"], caption=rich_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+                else:
+                    await client.send_video(chat_id=message.chat.id, video=cached["file_id"], caption=rich_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+                await status_msg.delete()
+                dl_queue.on_success(message.from_user.id)
+                return True
+            except Exception as e:
+                print(f"Cache send fail: {e}")
     return False
 
 async def cached_upload(client, chat_id, url, filename, thumb_name, title, rich_caption, duration, width, height, message, status_msg, start_upload, command_type):
@@ -643,8 +669,12 @@ async def cached_upload(client, chat_id, url, filename, thumb_name, title, rich_
     if upload_chat_id == CACHE_CHANNEL_ID and sent_msgs:
         if not isinstance(sent_msgs, list):
             sent_msgs = [sent_msgs]
+        
+        # Filter out None entries
+        sent_msgs = [m for m in sent_msgs if m]
+        total_parts = len(sent_msgs)
             
-        if len(sent_msgs) == 1:
+        if total_parts == 1:
             sent_msg = sent_msgs[0]
             fid = None
             ftype = "video"
@@ -655,7 +685,7 @@ async def cached_upload(client, chat_id, url, filename, thumb_name, title, rich_
                 ftype = "document"
                 
             if fid:
-                save_to_cache(url, fid, ftype, title, duration, width, height, os.path.getsize(filename), CACHE_CHANNEL_ID, sent_msg.id, command_type)
+                save_to_cache(url, fid, ftype, title, duration, width, height, os.path.getsize(filename), CACHE_CHANNEL_ID, sent_msg.id, command_type, part_number=1, total_parts=1)
                 
             # Send to user
             try:
@@ -666,9 +696,8 @@ async def cached_upload(client, chat_id, url, filename, thumb_name, title, rich_
             except Exception as e:
                 print(f"Failed to forward cached video: {e}")
         else:
-            # Multiple parts: forward all parts to user
-            for m in sent_msgs:
-                if not m: continue
+            # Multiple parts: save ALL parts to DB, then forward to user
+            for idx, m in enumerate(sent_msgs, 1):
                 fid = None
                 ftype = "video"
                 if m.video:
@@ -678,16 +707,30 @@ async def cached_upload(client, chat_id, url, filename, thumb_name, title, rich_
                     ftype = "document"
                     
                 if fid:
+                    # Save each part to cache DB
+                    save_to_cache(
+                        source_url=url,
+                        file_id=fid,
+                        file_type=ftype,
+                        title=title,
+                        duration=duration,
+                        width=width,
+                        height=height,
+                        file_size=0,  # individual part size not easily available
+                        cache_chat_id=CACHE_CHANNEL_ID,
+                        cache_message_id=m.id,
+                        command_type=command_type,
+                        part_number=idx,
+                        total_parts=total_parts
+                    )
+                    
+                    # Forward to user
                     try:
-                        part_info = ""
-                        if m.caption and "💔" in m.caption:
-                            part_info = "\n\n" + m.caption[m.caption.find("💔"):]
-                            
-                        user_caption = rich_caption + part_info
+                        part_caption = rich_caption + f"\n\n <emoji id=5213157963023273778>💔</emoji> <b>Part {idx} of {total_parts}</b>"
                         if ftype == "video":
-                            await client.send_video(chat_id=chat_id, video=fid, caption=user_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+                            await client.send_video(chat_id=chat_id, video=fid, caption=part_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
                         else:
-                            await client.send_document(chat_id=chat_id, document=fid, caption=user_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
+                            await client.send_document(chat_id=chat_id, document=fid, caption=part_caption, parse_mode=ParseMode.HTML, reply_to_message_id=message.id)
                     except Exception as e:
                         print(f"Failed to forward multi-part video to user: {e}")
 
